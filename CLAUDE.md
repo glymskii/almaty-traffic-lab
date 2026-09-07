@@ -58,15 +58,20 @@ Node 22 (нативная загрузка `.ts`, импорты с расшир
 
 ## Как взять задачу
 1. Открой `docs/tasks/T-NN-*.md`. Проверь, что все зависимости из шапки уже в `main` (`git log --oneline | grep T-`).
-2. Работай в своём worktree и ветке:
+2. Работай в своём worktree и ветке. Если окно запущено из чипа задачи, worktree уже создан за тебя:
+   проверь `git worktree list` и `git branch --show-current`; если ветка не `task/T-NN`, выполни
+   `git switch -c task/T-NN`. Иначе создай worktree сам:
    ```bash
    git worktree add ../atl-T-NN -b task/T-NN main
    cd ../atl-T-NN && pnpm install
    ```
+   В любом случае первым делом `pnpm install` и убедись, что `pnpm check` зелёный до твоих правок.
 3. Реализуй по карточке. Запускай `pnpm check` часто. Синтетические сети для тестов: `packages/sim-core/test/fixtures/builders.ts`.
 4. Definition of Done: `pnpm check` зелёный, критерии приёмки из карточки выполнены, README пакета обновлён,
    коммиты по Conventional Commits с префиксом задачи: `feat(sim-core): T-04 IDM kernel`.
-5. Заверши отчётом в чате по шаблону ниже. Слияние в `main` делает владелец после ревью.
+5. Запушь ветку и открой PR в приватный репозиторий: `git push -u origin task/T-NN`, затем
+   `gh pr create --base main --fill`. Слияние в `main` делает владелец после ревью.
+6. Заверши отчётом в чате по шаблону ниже.
 
 ## Шаблон отчёта в конце задачи
 ```
