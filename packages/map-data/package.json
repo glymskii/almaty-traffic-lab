@@ -1,0 +1,19 @@
+{
+  "name": "@atl/map-data",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "OSM import (tiled Overpass snapshot) and compiler OSM -> network.json with assumption generator and provenance.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "import": "node src/cli/import.ts",
+    "compile": "node src/cli/compile.ts"
+  },
+  "dependencies": {
+    "@atl/contracts": "workspace:*"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@atl/contracts",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Frozen schemas and types shared by every package: network, overrides, sim config, metrics, causes, state buffers, worker protocol.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "^4.5.4"
+  }
+}

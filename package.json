@@ -1,0 +1,31 @@
+{
+  "name": "almaty-traffic-lab",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Almaty Traffic Lab: 3D microscopic traffic simulation of central Almaty with bottleneck detection and explanation.",
+  "packageManager": "pnpm@10.33.4",
+  "engines": {
+    "node": ">=22"
+  },
+  "type": "module",
+  "scripts": {
+    "check": "pnpm typecheck && pnpm lint && pnpm determinism && pnpm test",
+    "typecheck": "pnpm -r --parallel typecheck",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "determinism": "node scripts/check-determinism.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "sim": "pnpm --filter @atl/sim-core sim",
+    "import": "pnpm --filter @atl/map-data import",
+    "compile": "pnpm --filter @atl/map-data compile",
+    "dev": "pnpm --filter @atl/web dev",
+    "build": "pnpm --filter @atl/web build"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.12",
+    "@types/node": "^26.4.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0"
+  }
+}

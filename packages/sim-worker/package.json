@@ -1,0 +1,18 @@
+{
+  "name": "@atl/sim-worker",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Web Worker wrapper around sim-core: message protocol, transferable frame buffers, main-thread client.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@atl/contracts": "workspace:*",
+    "@atl/sim-core": "workspace:*"
+  }
+}

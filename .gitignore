@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.vite/
+coverage/
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example
+.vercel/
+playwright-report/
+test-results/
+# raw OSM tiles are committed compressed; never commit the uncompressed working copies
+data/osm/**/*.json
+!data/osm/**/*.json.gz
