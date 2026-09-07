@@ -1,0 +1,166 @@
+{
+  "bboxId": "mini",
+  "fetchedAt": "2026-09-01T00:00:00Z",
+  "osmTimestamp": "2026-08-31T12:00:00Z",
+  "elements": [
+    {
+      "type": "node",
+      "id": 9,
+      "lat": 43.23509,
+      "lon": 76.915,
+      "tags": {
+        "highway": "traffic_signals",
+        "traffic_signals:direction": "forward"
+      }
+    },
+    {
+      "type": "way",
+      "id": 100,
+      "tags": {
+        "highway": "primary",
+        "name": "Абая",
+        "name:ru": "Проспект Абая",
+        "lanes": "4",
+        "turn:lanes:forward": "left|through"
+      },
+      "nodes": [1, 2],
+      "geometry": [
+        {
+          "lat": 43.235,
+          "lon": 76.905
+        },
+        {
+          "lat": 43.235,
+          "lon": 76.915
+        }
+      ]
+    },
+    {
+      "type": "way",
+      "id": 101,
+      "tags": {
+        "highway": "primary",
+        "name": "Проспект Абая",
+        "lanes": "4",
+        "maxspeed": "RU:urban"
+      },
+      "nodes": [2, 3],
+      "geometry": [
+        {
+          "lat": 43.235,
+          "lon": 76.915
+        },
+        {
+          "lat": 43.235,
+          "lon": 76.925
+        }
+      ]
+    },
+    {
+      "type": "way",
+      "id": 200,
+      "tags": {
+        "highway": "secondary",
+        "name": "Сейфуллина",
+        "oneway": "yes",
+        "busway": "lane",
+        "maxspeed": "40",
+        "lanes": "3"
+      },
+      "nodes": [4, 9, 2, 5],
+      "geometry": [
+        {
+          "lat": 43.245,
+          "lon": 76.915
+        },
+        {
+          "lat": 43.23509,
+          "lon": 76.915
+        },
+        {
+          "lat": 43.235,
+          "lon": 76.915
+        },
+        {
+          "lat": 43.225,
+          "lon": 76.915
+        }
+      ]
+    },
+    {
+      "type": "way",
+      "id": 301,
+      "tags": {
+        "highway": "residential",
+        "name": "Тимирязева"
+      },
+      "nodes": [6, 8],
+      "geometry": [
+        {
+          "lat": 43.232,
+          "lon": 76.912
+        },
+        {
+          "lat": 43.2315,
+          "lon": 76.9115
+        }
+      ]
+    },
+    {
+      "type": "way",
+      "id": 302,
+      "tags": {
+        "highway": "residential",
+        "name": "Тимирязева"
+      },
+      "nodes": [8, 7],
+      "geometry": [
+        {
+          "lat": 43.2315,
+          "lon": 76.9115
+        },
+        {
+          "lat": 43.228,
+          "lon": 76.905
+        }
+      ]
+    },
+    {
+      "type": "way",
+      "id": 400,
+      "tags": {
+        "highway": "footway"
+      },
+      "nodes": [2, 11],
+      "geometry": [
+        {
+          "lat": 43.235,
+          "lon": 76.915
+        },
+        {
+          "lat": 43.2355,
+          "lon": 76.9155
+        }
+      ]
+    },
+    {
+      "type": "way",
+      "id": 401,
+      "tags": {
+        "highway": "service",
+        "name": "Проезд"
+      },
+      "nodes": [8, 11],
+      "geometry": [
+        {
+          "lat": 43.2315,
+          "lon": 76.9115
+        },
+        {
+          "lat": 43.2355,
+          "lon": 76.9155
+        }
+      ]
+    }
+  ]
+}
