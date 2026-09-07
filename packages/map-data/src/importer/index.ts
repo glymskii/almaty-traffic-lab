@@ -1,4 +1,9 @@
+import { join } from "node:path";
 import type { BBoxPreset } from "../bboxes.ts";
+import { fetchOverpassQuery } from "./fetch.ts";
+import { mergeOsmResponses, type OsmLayerResponse, readGzJson, writeGzJson } from "./merge.ts";
+import { buildOverpassQuery, OSM_LAYERS } from "./queries.ts";
+import { splitIntoTiles, tileCacheKey } from "./tiles.ts";
 
 /** Raw Overpass JSON element (subset we rely on). */
 export interface OsmElement {
@@ -29,10 +34,50 @@ export interface ImportOptions {
   useCache?: boolean;
 }
 
+/** Pause between tiles (not between the 5 layer requests within a tile) so mirrors don't answer 429. */
+const TILE_FETCH_DELAY_MS = 2000;
+
 /**
- * Tiled Overpass import with retries and mirror fallback. Implemented in T-01.
- * Writes data/osm/<bboxId>/tiles/<row>-<col>.json.gz and data/osm/<bboxId>/snapshot.json.gz (merged, deduplicated).
+ * Tiled Overpass import with retries and mirror fallback.
+ * Writes data/osm/<bboxId>/tiles/<row>-<col>.<layer>.json.gz and data/osm/<bboxId>/snapshot.json.gz
+ * (merged, deduplicated). Tiles already on disk are reused when useCache is true (the default).
  */
-export async function importOsm(_opts: ImportOptions): Promise<OsmSnapshot> {
-  throw new Error("not implemented: see docs/tasks/T-01-osm-importer.md");
+export async function importOsm(opts: ImportOptions): Promise<OsmSnapshot> {
+  const { bbox, outDir } = opts;
+  const useCache = opts.useCache ?? true;
+  const tiles = splitIntoTiles(bbox, bbox.tilesPerSide);
+  const tilesDir = join(outDir, "tiles");
+
+  const responses: OsmLayerResponse[] = [];
+  for (const [i, tile] of tiles.entries()) {
+    let fetchedFromNetwork = false;
+    for (const layer of OSM_LAYERS) {
+      const cachePath = join(tilesDir, `${tileCacheKey(tile)}.${layer}.json.gz`);
+      const cached = useCache ? await readGzJson<OsmLayerResponse>(cachePath) : undefined;
+      if (cached) {
+        responses.push(cached);
+        continue;
+      }
+      const query = buildOverpassQuery(layer, tile);
+      const result = await fetchOverpassQuery(
+        query,
+        opts.endpoints !== undefined ? { endpoints: opts.endpoints } : {},
+      );
+      const stamped: OsmLayerResponse = { ...result, fetchedAt: new Date().toISOString() };
+      await writeGzJson(cachePath, stamped);
+      responses.push(stamped);
+      fetchedFromNetwork = true;
+    }
+    if (fetchedFromNetwork && i < tiles.length - 1) {
+      await sleep(TILE_FETCH_DELAY_MS);
+    }
+  }
+
+  const snapshot = mergeOsmResponses(bbox.id, responses);
+  await writeGzJson(join(outDir, "snapshot.json.gz"), snapshot);
+  return snapshot;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
