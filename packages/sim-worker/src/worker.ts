@@ -1,30 +1,21 @@
 /// <reference lib="webworker" />
-import type { MainToWorker, WorkerToMain } from "@atl/contracts";
+import type { MainToWorker } from "@atl/contracts";
+import { createSimulation } from "@atl/sim-core";
+import { createStubSimulation } from "./stub-simulation.ts";
+import { createWorkerMain } from "./worker-main.ts";
 
 /**
- * Worker entry point. One instance = one simulation. Implemented in T-06:
- *  - init: createSimulation, allocate frameBufferCount FrameBuffers, reply `ready`
- *  - play/pause/runUntil: drive sim.step() in a self-scheduled loop respecting speedFactor and frameRateHz
- *  - frames are sent only when a free buffer is available (ping-pong via returnFrame)
- *  - metrics every config.metrics.sampleIntervalS, report on requestReport and every windowS
+ * Worker entry point for the browser. One instance = one simulation.
+ * `?sim=stub` on the worker's own script URL selects StubSimulation instead of the real kernel
+ * (apps/web's debug view uses this until T-04/T-13 land); the default is the real @atl/sim-core.
  */
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 
-function post(msg: WorkerToMain, transfer: ArrayBuffer[] = []): void {
-  ctx.postMessage(msg, transfer);
-}
+const useStub = new URLSearchParams(ctx.location.search).get("sim") === "stub";
 
-ctx.onmessage = (ev: MessageEvent<MainToWorker>) => {
-  const msg = ev.data;
-  switch (msg.type) {
-    case "init":
-      post({
-        type: "error",
-        message: "sim-worker not implemented: see docs/tasks/T-06-worker-protocol.md",
-        fatal: true,
-      });
-      break;
-    default:
-      post({ type: "error", message: `unexpected message before init: ${msg.type}`, fatal: false });
-  }
-};
+const main = createWorkerMain({
+  post: (msg, transfer) => ctx.postMessage(msg, transfer ?? []),
+  createSimulation: useStub ? createStubSimulation : createSimulation,
+});
+
+ctx.onmessage = (ev: MessageEvent<MainToWorker>) => main.onMessage(ev.data);
