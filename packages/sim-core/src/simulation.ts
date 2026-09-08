@@ -26,6 +26,7 @@ import { ArrivalQueues } from "./demand/spawner.ts";
 import { sampleDriverInto } from "./models/driver.ts";
 import { idmAcceleration, idmFreeAcceleration } from "./models/idm.ts";
 import { mandatoryBias, mobilIncentive, mobilSafe } from "./models/mobil.ts";
+import { PedestrianRuntime } from "./pedestrians/crosswalks.ts";
 import { Rng } from "./rng.ts";
 import { ROUTE_ARRIVE, ROUTE_UNREACHABLE } from "./routing/dijkstra.ts";
 import { RoutingGraph } from "./routing/graph.ts";
@@ -145,6 +146,8 @@ export interface SimulationKernel {
   readonly lanes: LaneRuntime;
   /** Conflict points, gap acceptance and gridlock (T-11); see `runtime/intersections.ts`. */
   readonly intersections: IntersectionRuntime;
+  /** Crosswalk arrivals, walkers and yield gap acceptance (T-15); see `pedestrians/crosswalks.ts`. */
+  readonly pedestrians: PedestrianRuntime;
   /** Per vehicle slot: 1 when the driver refuses to enter a junction whose exit is full (T-11). */
   readonly gridlockDisciplined: Uint8Array;
   /** Link-level routing graph (T-12); see `routing/graph.ts`. */
@@ -188,6 +191,7 @@ export function kernelOf(sim: Simulation): SimulationKernel {
     signals: sim.signals,
     lanes: sim.lanes,
     intersections: sim.intersections,
+    pedestrians: sim.pedestrians,
     gridlockDisciplined: sim.gridlockDisciplined,
     routingGraph: sim.routingGraph,
     od: sim.od,
@@ -248,6 +252,8 @@ const RNG_FORK_ROUTES = 4;
 const RNG_FORK_OD = 5;
 /** Bus schedule offsets and dwell durations (T-14). */
 const RNG_FORK_TRANSIT = 6;
+/** Pedestrian arrivals and crossing draws (T-15). */
+const RNG_FORK_PEDESTRIANS = 7;
 
 /** Smoothing of the measured link travel time the navigators route on (T-12, alpha). */
 const LIVE_COST_ALPHA = 0.3;
@@ -268,6 +274,8 @@ const CAUSE_DOWNSTREAM_SPILLBACK = causeCode("downstream_spillback");
 /** T-14: a scheduled bus stop dwell and, for the vehicles queued behind a dwelling bus, its cause. */
 const CAUSE_BUS_DWELL = causeCode("bus_dwell");
 const CAUSE_BEHIND_STOPPED_BUS = causeCode("behind_stopped_bus");
+/** T-15: yielding to a pedestrian on, or about to step onto, a crosswalk. */
+const CAUSE_PEDESTRIAN_YIELD = causeCode("pedestrian_yield");
 
 /**
  * A vehicle giving way stops this far short of a conflict point. Slightly more than the occupancy
@@ -309,6 +317,7 @@ class SimulationImpl implements Simulation {
   readonly signals: SignalRuntime;
   readonly lanes: LaneRuntime;
   readonly intersections: IntersectionRuntime;
+  readonly pedestrians: PedestrianRuntime;
   readonly routingGraph: RoutingGraph;
   readonly od: OdModel;
   readonly routeTrees: RouteTrees;
@@ -337,6 +346,8 @@ class SimulationImpl implements Simulation {
   private readonly odRng: Rng;
   /** Bus schedule offsets and dwell durations (T-14). */
   private readonly transitRng: Rng;
+  /** Pedestrian arrivals and crossing draws (T-15). */
+  private readonly pedestrianRng: Rng;
   private readonly hash = new TrajectoryHash();
 
   // ---- transit (T-14) ----
@@ -414,6 +425,7 @@ class SimulationImpl implements Simulation {
     this.routeRng = master.fork(RNG_FORK_ROUTES);
     this.odRng = master.fork(RNG_FORK_OD);
     this.transitRng = master.fork(RNG_FORK_TRANSIT);
+    this.pedestrianRng = master.fork(RNG_FORK_PEDESTRIANS);
     this.pendingLane = new Int32Array(opts.config.demand.vehicleBudget).fill(-1);
     this.pendingLeader = new Int32Array(opts.config.demand.vehicleBudget).fill(-1);
     this.laneChangeBlocked = new Uint8Array(opts.config.demand.vehicleBudget);
@@ -491,6 +503,14 @@ class SimulationImpl implements Simulation {
       opts.config.peakHours,
     );
     this.transitStops = new BusStopRuntime(opts.network, this.runtime);
+
+    // Pedestrians (T-15): independent of transit/routing, just the network and its own config slice.
+    this.pedestrians = new PedestrianRuntime(
+      opts.network,
+      this.runtime,
+      opts.config.pedestrians,
+      this.pedestrianRng,
+    );
   }
 
   get config(): SimConfig {
@@ -516,7 +536,13 @@ class SimulationImpl implements Simulation {
     const peak = isPeakHour(this.cfg, this.clock.timeOfDayMin);
     this.transitStops.update(this.pool, now, this.cfg.behavior, peak, this.transitRng); // 0a (T-14)
     this.updateSignals(now); // 1
-    // 2 (pedestrians): later task.
+    this.pedestrians.update(
+      dt,
+      now,
+      this.clock.hourOfDay,
+      this.signals.groupState,
+      this.pedestrianRng,
+    ); // 2 (T-15)
     this.updateRoutes(now); // 3
     this.selectLanes(); // 4
     this.changeLanes(now); // 5
@@ -1323,6 +1349,18 @@ class SimulationImpl implements Simulation {
             if (aFree - aStop >= LEADER_BINDING_MPS2) c = this.conflictCause;
           }
         }
+
+        // Obstacle: a pedestrian on, or about to step onto, a crosswalk this movement crosses (T-15).
+        if (this.pedestrians.enabled && (rt.connCrosswalkCount[conn] as number) > 0) {
+          const distPed = this.pedestrianStopDistance(i, conn, sHere);
+          if (distPed < Number.POSITIVE_INFINITY) {
+            const aStop = this.accelTowardObstacle(i, vi, v0, distPed, 0);
+            if (aStop < acc) {
+              acc = aStop;
+              if (aFree - aStop >= LEADER_BINDING_MPS2) c = CAUSE_PEDESTRIAN_YIELD;
+            }
+          }
+        }
       }
 
       // Obstacle: the exit of the movement has no room left and the driver is disciplined enough
@@ -1412,6 +1450,55 @@ class SimulationImpl implements Simulation {
       }
     }
     return Number.POSITIVE_INFINITY;
+  }
+
+  /**
+   * Distance from `sHere` to the point where connector `conn` enters its crosswalk(s), or +Infinity
+   * when no pedestrian threatens it right now (T-15). Same shape as `conflictStopDistance` on purpose:
+   * the crosswalk sits right where the connector meets its destination lane (the compiler places it
+   * just past the junction box, `CROSSWALK_CLEARANCE_M`), so the stop point is the connector's own
+   * end minus the usual margin, rolled back over any of the connector's *vehicle* conflict points
+   * within body length -- otherwise a car waiting for pedestrians could straddle an earlier conflict
+   * point it already crossed and report that movement falsely jammed/gridlocked (T-11 review note).
+   *
+   * A vehicle already past the last safe waiting spot keeps going unless a pedestrian is *actually* on
+   * the crosswalk (`occupied`): the anticipatory half of `threatTimeS` must never hold a car that is
+   * already committed at zero gap for a pedestrian who has not stepped out yet, mirroring how
+   * `conflictStopDistance` only forces 0 there for a point that is truly occupied or jammed.
+   */
+  private pedestrianStopDistance(i: number, conn: number, sHere: number): number {
+    const rt = this.runtime;
+    const pool = this.pool;
+    const start = rt.connCrosswalkStart[conn] as number;
+    const count = rt.connCrosswalkCount[conn] as number;
+    const lengthI = pool.length[i] as number;
+    // Accepted gap = the driver's critical gap plus the time it needs to clear the crossing from the
+    // place it waits, exactly like `conflictStopDistance`'s left-turn/merge gap.
+    const criticalGapS =
+      (pool.gapPedestrian[i] as number) +
+      (CONFLICT_STOP_MARGIN_M + CONFLICT_ZONE_M + lengthI) / CONFLICT_CROSSING_MPS;
+    let threat = Number.POSITIVE_INFINITY;
+    let occupied = false;
+    for (let k = start; k < start + count; k++) {
+      const cw = rt.connCrosswalkList[k] as number;
+      if (this.pedestrians.activeCount(cw) > 0) occupied = true;
+      const t = this.pedestrians.threatTimeS(cw);
+      if (t < threat) threat = t;
+    }
+    if (!occupied && threat >= criticalGapS) return Number.POSITIVE_INFINITY;
+
+    let stopAt = (rt.trackEndS[conn] as number) - CONFLICT_STOP_MARGIN_M;
+    const cf = this.intersections.conflicts;
+    const cStart = cf.conflictStart[conn] as number;
+    const cCount = cf.conflictCount[conn] as number;
+    for (let m = cStart + cCount - 1; m >= cStart; m--) {
+      const earlier = cf.conflictSThis[m] as number;
+      if (earlier >= stopAt) continue; // not behind the pedestrian point
+      if (earlier < stopAt - lengthI - CONFLICT_STOP_MARGIN_M) break;
+      stopAt = earlier - CONFLICT_STOP_MARGIN_M;
+    }
+    if (stopAt > sHere) return stopAt - sHere;
+    return occupied ? 0 : Number.POSITIVE_INFINITY;
   }
 
   /** IDM acceleration of vehicle `i` (speed `v`, desired `v0`) towards an obstacle `gap` metres ahead. */
@@ -1901,7 +1988,7 @@ class SimulationImpl implements Simulation {
     frame.count = out;
     frame.simTimeS = this.clock.simTimeS;
     frame.signalStates.set(this.signals.groupState);
-    frame.crosswalkPeds.fill(0);
+    this.pedestrians.writeCounts(frame.crosswalkPeds);
     return frame;
   }
 
