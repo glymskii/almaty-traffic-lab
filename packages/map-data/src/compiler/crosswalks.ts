@@ -29,7 +29,21 @@ export function buildCrosswalks(input: CrosswalkInput): Crosswalk[] {
   const wanted = new Set<string>();
   for (const node of net.nodes) if (node.kind === "signalized") wanted.add(node.id);
   for (const nodeId of nodesNearCrossings(net, graph)) wanted.add(nodeId);
+  return buildCrosswalksForNodes(net, byNode, [...wanted].sort(), assumptions);
+}
 
+/**
+ * The per-node half of `buildCrosswalks`, split out so a scenario override (T-24) can refresh the
+ * zebras of just the nodes whose connectors it just rebuilt, without needing the OSM graph that
+ * decides *which* nodes get zebras in the first place (that decision doesn't change when a link's
+ * lane count or bus lane changes, only the connectors the zebra must list do).
+ */
+export function buildCrosswalksForNodes(
+  net: Network,
+  byNode: ReadonlyMap<string, NodeMovements>,
+  nodeIds: readonly string[],
+  assumptions: AssumptionCollector,
+): Crosswalk[] {
   const connectorsByLink = new Map<string, string[]>();
   const laneLink = new Map(net.lanes.map((l) => [l.id, l.linkId] as const));
   for (const c of net.connectors) {
@@ -42,7 +56,7 @@ export function buildCrosswalks(input: CrosswalkInput): Crosswalk[] {
   const connectorById = new Map(net.connectors.map((c) => [c.id, c] as const));
 
   const crosswalks: Crosswalk[] = [];
-  for (const nodeId of [...wanted].sort()) {
+  for (const nodeId of nodeIds) {
     const movements = byNode.get(nodeId);
     if (movements === undefined) continue;
     movements.arms.forEach((arm, index) => {

@@ -20,6 +20,7 @@ import {
 import { runIntersections } from "./intersections.ts";
 import { buildLinks, type LinkLevel, type WayLinks } from "./links.ts";
 import { buildOsmGraph } from "./osm-graph.ts";
+import { applyOverrides as applyOverridesImpl } from "./overrides.ts";
 import { type CompileContext, LATER_STAGES, runLaterStages } from "./stages.ts";
 import { buildTopology } from "./topology.ts";
 import { runTransit } from "./transit.ts";
@@ -169,11 +170,17 @@ export function compileNetwork(opts: CompileOptions): CompileReport {
   };
 }
 
-/** Re-apply scenario overrides to an already compiled network (used by the UI; must be deterministic). */
+/**
+ * Re-applies scenario overrides to an already compiled network (T-24). The implementation lives in
+ * `./overrides.ts`, which the browser also reaches directly via the `@atl/map-data/overrides`
+ * subpath export (package.json) so it never has to load this module's `node:crypto` import or the
+ * OSM importer the rest of the package barrel pulls in.
+ */
 export function applyOverrides(
-  _network: Network,
-  _overrides: NetworkOverride[],
-  _config: SimConfig,
+  network: Network,
+  overrides: NetworkOverride[],
+  config: SimConfig,
+  scenarioId?: string,
 ): Network {
-  throw new Error("not implemented: see docs/tasks/T-24-scenario-editor.md");
+  return applyOverridesImpl(network, overrides, config, scenarioId);
 }

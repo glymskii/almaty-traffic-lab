@@ -363,3 +363,151 @@ body {
   padding: 2px 6px;
   border-radius: 4px;
 }
+
+/* --- Scenario editor (T-24) --- */
+
+.scenarios-tab section {
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.scenario-items {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+
+.scenario-item {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 0;
+  font-size: 12px;
+}
+
+.scenario-item-name {
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 2px 0;
+  text-align: left;
+}
+
+.scenario-item.active .scenario-item-name {
+  color: #3a7bd5;
+  font-weight: 600;
+}
+
+.scenario-running-badge {
+  font-size: 10px;
+  opacity: 0.75;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
+.scenario-item-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.scenario-item-actions button {
+  background: transparent;
+  color: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 5px;
+}
+
+.scenario-create-row {
+  display: flex;
+  gap: 6px;
+}
+
+.scenario-create-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.run-scenario-btn {
+  margin-bottom: 4px;
+}
+
+.scenario-run-hint {
+  font-size: 11px;
+  opacity: 0.7;
+  margin: 0 0 10px;
+}
+
+.scenario-io-row {
+  display: flex;
+  gap: 6px;
+}
+
+.scenario-io-row button {
+  flex: 1 1 auto;
+  background: transparent;
+  color: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  padding: 6px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.scenario-file-input {
+  display: none;
+}
+
+.scenario-import-error {
+  color: #e0906a;
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+.scenario-hint {
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.entity-form h4 {
+  margin: 0 0 10px;
+}
+
+.entity-form h5 {
+  margin: 12px 0 6px;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.bus-lane-fields {
+  padding-left: 10px;
+  border-left: 2px solid rgba(255, 255, 255, 0.15);
+}
+
+.entity-form-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.entity-form-actions .apply-restart-btn {
+  flex: 1 1 auto;
+}
+
+.reset-override-btn {
+  background: transparent;
+  color: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}

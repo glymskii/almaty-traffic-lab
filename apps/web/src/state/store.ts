@@ -1,12 +1,29 @@
 import {
   type BottleneckReport,
   defaultSimConfig,
+  type NetworkOverride,
   RUNTIME_SAFE_PARAM_PATHS,
+  type Scenario,
   type SimConfigPatch,
 } from "@atl/contracts";
 import { create } from "zustand";
 import type { SimHandle } from "../sim/client.ts";
 import type { Status, ViewportHandle } from "../Viewport.tsx";
+import {
+  BASELINE_SCENARIO_ID,
+  duplicateScenario as copyScenario,
+  loadStoredScenarios,
+  createScenario as makeScenario,
+  parseImportedScenario,
+  persistScenarios,
+  removeOverride,
+  removeScenario as removeScenarioFromList,
+  renameScenario as renameScenarioRecord,
+  replaceScenario,
+  upsertOverride,
+} from "./scenarios.ts";
+
+export type { Scenario } from "@atl/contracts";
 
 /**
  * Global UI store (docs/tasks/T-23 п.1: "состояние через лёгкий стор"). Zustand is the one new
@@ -116,6 +133,18 @@ export function needsRestart(applied: RestartParams, draft: RestartParams): bool
 }
 
 // ---------------------------------------------------------------------------
+// Scenarios (docs/tasks/T-24). `activeScenarioId` is what the "Сценарии" tab edits (a draft, in
+// the T-23 sense); `appliedScenarioId` is what the *running* sim was last (re)started with -
+// exactly the `appliedRestartParams`/`draftRestartParams` split above, reused rather than
+// reinvented (T-23 review notes). Editing an override writes straight into the active scenario's
+// data (localStorage) - only "Запустить" ever restarts the sim, via the very same fold the other
+// three restart paths use.
+// ---------------------------------------------------------------------------
+
+/** Node or link the user last clicked on the map, for `ScenariosTab` to open the right form. */
+export type MapSelection = { kind: "node"; id: string } | { kind: "link"; id: string };
+
+// ---------------------------------------------------------------------------
 // HUD polling (docs/tasks/T-23 п.4): the worker already pushes a BottleneckReport every
 // `metrics.windowS`; requesting one on a shorter, fixed cadence keeps the HUD's average speed and
 // windowed delay reasonably fresh without inventing a second protocol message.
@@ -140,6 +169,15 @@ export interface StoreState {
   /** Bumped to force Viewport to unmount/remount (see ui/App.tsx's `key={restartToken}`). */
   restartToken: number;
 
+  /** Every stored scenario (all networks - `scenariosForNetwork` filters for the current one). */
+  scenarios: Scenario[];
+  /** Scenario the "Сценарии" tab is editing; "baseline" is the synthetic no-overrides scenario. */
+  activeScenarioId: string;
+  /** Scenario the *running* sim was last (re)started with. */
+  appliedScenarioId: string;
+  /** Node/link last clicked on the map, for the scenario editor's forms. */
+  selection: MapSelection | undefined;
+
   viewport: ViewportHandle | undefined;
   sim: SimHandle | undefined;
   report: BottleneckReport | undefined;
@@ -159,10 +197,38 @@ export interface StoreState {
   setDraftRestartParam<K extends keyof RestartParams>(key: K, value: RestartParams[K]): void;
   setStatus(status: Status, progress?: number): void;
   bindViewport(handle: ViewportHandle): void;
+
+  setSelection(selection: MapSelection | undefined): void;
+  setActiveScenarioId(id: string): void;
+  runActiveScenario(): void;
+  createScenario(name: string): void;
+  duplicateScenario(id: string, name: string): void;
+  renameScenario(id: string, name: string): void;
+  deleteScenario(id: string): void;
+  upsertOverrideInActiveScenario(override: NetworkOverride): void;
+  removeOverrideFromActiveScenario(kind: NetworkOverride["kind"], refId: string): void;
+  importScenario(json: string): void;
 }
 
 /** Cleans up the previous mount's subscriptions/timers before `bindViewport` attaches new ones. */
 let unbindPrevious: (() => void) | undefined;
+
+/**
+ * The one place that remounts Viewport (T-23 review notes: every restart path must fold the draft
+ * restart params the same way, or one of them will silently revert an unapplied change). Every
+ * action that forces a fresh network load - a network switch, a time preset, "Перезапуск", and
+ * T-24's "Запустить" scenario - calls this instead of repeating the two fields inline.
+ */
+function foldRestart(
+  state: Pick<StoreState, "draftRestartParams" | "restartToken">,
+  extra: Partial<StoreState> = {},
+): Partial<StoreState> {
+  return {
+    appliedRestartParams: state.draftRestartParams,
+    restartToken: state.restartToken + 1,
+    ...extra,
+  };
+}
 
 export const useStore = create<StoreState>()((set, get) => ({
   activeTab: "overview",
@@ -176,6 +242,11 @@ export const useStore = create<StoreState>()((set, get) => ({
   status: "loading",
   warmupProgress: 0,
   restartToken: 0,
+
+  scenarios: loadStoredScenarios(),
+  activeScenarioId: BASELINE_SCENARIO_ID,
+  appliedScenarioId: BASELINE_SCENARIO_ID,
+  selection: undefined,
 
   viewport: undefined,
   sim: undefined,
@@ -193,24 +264,24 @@ export const useStore = create<StoreState>()((set, get) => ({
     // restart-required draft in the same way applyTimePreset/restart() do - otherwise a vehicle
     // budget/taxi-lane change the user made but hadn't applied yet would be silently dropped by
     // the remount, and ParamsPanel would still show "Применить и перезапустить" as if nothing had
-    // just restarted.
-    set({
-      networkKey: key,
-      appliedRestartParams: get().draftRestartParams,
-      restartToken: get().restartToken + 1,
-    });
+    // just restarted. A scenario is authored against one network, so switching networks also
+    // drops back to baseline - the old scenario's link/node ids would not resolve here at all.
+    set((state) =>
+      foldRestart(state, {
+        networkKey: key,
+        activeScenarioId: BASELINE_SCENARIO_ID,
+        appliedScenarioId: BASELINE_SCENARIO_ID,
+        selection: undefined,
+      }),
+    );
   },
 
   applyTimePreset: (preset) => {
-    set({
-      startTimeMin: TIME_PRESETS[preset],
-      appliedRestartParams: get().draftRestartParams,
-      restartToken: get().restartToken + 1,
-    });
+    set((state) => foldRestart(state, { startTimeMin: TIME_PRESETS[preset] }));
   },
 
   restart: () => {
-    set({ appliedRestartParams: get().draftRestartParams, restartToken: get().restartToken + 1 });
+    set((state) => foldRestart(state));
   },
 
   setSpeedFactor: (factor) => {
@@ -294,6 +365,87 @@ export const useStore = create<StoreState>()((set, get) => ({
       offReport?.();
       if (reportTimer) clearInterval(reportTimer);
     };
+  },
+
+  setSelection: (selection) => set({ selection }),
+
+  setActiveScenarioId: (id) => set({ activeScenarioId: id, selection: undefined }),
+
+  runActiveScenario: () => {
+    // Same fold as every other restart path (see `foldRestart`); the actual recompile with
+    // overrides happens inside Viewport once it remounts with the new `appliedScenarioId`.
+    set((state) => foldRestart(state, { appliedScenarioId: state.activeScenarioId }));
+  },
+
+  createScenario: (name) => {
+    const networkId = NETWORK_IDS[get().networkKey];
+    const scenario = makeScenario(name, networkId);
+    const scenarios = [...get().scenarios, scenario];
+    persistScenarios(scenarios);
+    set({ scenarios, activeScenarioId: scenario.id });
+  },
+
+  duplicateScenario: (id, name) => {
+    const source = get().scenarios.find((s) => s.id === id);
+    if (source === undefined) return;
+    const copy = copyScenario(source, name);
+    const scenarios = [...get().scenarios, copy];
+    persistScenarios(scenarios);
+    set({ scenarios, activeScenarioId: copy.id });
+  },
+
+  renameScenario: (id, name) => {
+    const source = get().scenarios.find((s) => s.id === id);
+    if (source === undefined) return;
+    const scenarios = replaceScenario(get().scenarios, renameScenarioRecord(source, name));
+    persistScenarios(scenarios);
+    set({ scenarios });
+  },
+
+  deleteScenario: (id) => {
+    if (id === BASELINE_SCENARIO_ID) return;
+    const scenarios = removeScenarioFromList(get().scenarios, id);
+    persistScenarios(scenarios);
+    set((state) => ({
+      scenarios,
+      activeScenarioId:
+        state.activeScenarioId === id ? BASELINE_SCENARIO_ID : state.activeScenarioId,
+      appliedScenarioId:
+        state.appliedScenarioId === id ? BASELINE_SCENARIO_ID : state.appliedScenarioId,
+    }));
+  },
+
+  upsertOverrideInActiveScenario: (override) => {
+    const { activeScenarioId } = get();
+    if (activeScenarioId === BASELINE_SCENARIO_ID) return;
+    const source = get().scenarios.find((s) => s.id === activeScenarioId);
+    if (source === undefined) return;
+    const scenarios = replaceScenario(get().scenarios, upsertOverride(source, override));
+    persistScenarios(scenarios);
+    set({ scenarios });
+  },
+
+  removeOverrideFromActiveScenario: (kind, refId) => {
+    const { activeScenarioId } = get();
+    if (activeScenarioId === BASELINE_SCENARIO_ID) return;
+    const source = get().scenarios.find((s) => s.id === activeScenarioId);
+    if (source === undefined) return;
+    const scenarios = replaceScenario(get().scenarios, removeOverride(source, kind, refId));
+    persistScenarios(scenarios);
+    set({ scenarios });
+  },
+
+  importScenario: (json) => {
+    const networkId = NETWORK_IDS[get().networkKey];
+    const imported = parseImportedScenario(json, networkId);
+    // An imported scenario keeps its own id: importing the same file twice updates it in place
+    // instead of piling up duplicates.
+    const exists = get().scenarios.some((s) => s.id === imported.id);
+    const scenarios = exists
+      ? replaceScenario(get().scenarios, imported)
+      : [...get().scenarios, imported];
+    persistScenarios(scenarios);
+    set({ scenarios, activeScenarioId: imported.id });
   },
 }));
 

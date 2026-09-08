@@ -7,6 +7,7 @@ export const ru = {
   appTitle: "Almaty Traffic Lab",
   attribution: "© Соавторы OpenStreetMap, ODbL",
   loadingNetwork: "Загрузка сети…",
+  compilingScenario: "Применение сценария…",
   warmingUp: "Прогрев симуляции…",
   loadError: "Не удалось загрузить сеть",
 
@@ -112,4 +113,58 @@ export const ru = {
     living_street: "Двор",
     service: "Служебный проезд",
   },
+
+  // Scenario editor (docs/tasks/T-24).
+  scenariosTitle: "Сценарии",
+  scenarioNamePlaceholder: "Название сценария",
+  scenarioCreate: "Создать",
+  scenarioDuplicate: "Копировать",
+  scenarioRename: "Переименовать",
+  scenarioRenamePrompt: "Новое название сценария:",
+  scenarioDelete: "Удалить",
+  scenarioRunningBadge: "запущен",
+  scenarioRun: "Запустить",
+  scenarioRunHint:
+    "Пересчитает сеть с изменениями сценария и перезапустит симуляцию на том же сиде",
+  scenarioExport: "Экспорт JSON",
+  scenarioImport: "Импорт JSON",
+  scenarioBaselineHint:
+    "Базовый сценарий — сеть без изменений. Создайте сценарий, чтобы редактировать перекрёстки и улицы.",
+  scenarioSelectHint:
+    "Кликните по перекрёстку со светофором или по улице на карте слева, чтобы отредактировать её.",
+  scenarioImportError: {
+    invalid_json: "Файл не является корректным JSON",
+    invalid_schema: "Файл не соответствует схеме сценария",
+    networkMismatch: (networkId: string) =>
+      `Сценарий рассчитан на сеть «${networkId}», а не на текущую`,
+  },
+  applyOverride: "Применить",
+  resetOverride: "Сбросить override",
+  sectionMain: "основная",
+  sectionArrowLeft: "стрелка налево",
+
+  notEditableNode: "Этот узел не регулируется светофором и не редактируется",
+  linkFormTitle: (name: string) => `Улица: ${name}`,
+  linkFormGeneralLanes: "Сквозные полосы",
+  linkFormSpeedLimit: "Скорость, км/ч",
+  linkFormLeftPocket: "Левый карман, м (0 — нет кармана)",
+  linkFormRightPocket: "Правый карман, м (0 — нет кармана)",
+  linkFormBusLane: "Выделенная полоса",
+  linkFormBusLaneFrom: "Действует с",
+  linkFormBusLaneTo: "Действует до",
+  linkFormBusLaneEntry: "Въезд машин направо за, м",
+
+  intersectionFormTitle: (name: string) => `Перекрёсток: ${name}`,
+  intersectionApproach: "Подход",
+  intersectionLeftTurnMode: "Левый поворот",
+  leftTurnModes: {
+    protected: "Со стрелкой",
+    permissive: "Со встречным потоком",
+    protected_permissive: "Стрелка + встречный поток",
+    prohibited: "Запрещён",
+  },
+  intersectionCycle: "Цикл, с",
+  intersectionOffset: "Смещение начала цикла, с",
+  intersectionPedestrianPhase: "Отдельная пешеходная фаза",
+  intersectionGreenTitle: "Зелёный по группам, с",
 } as const;

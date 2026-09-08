@@ -2,8 +2,10 @@
 
 Three.js-рендер полотна дорог и разметки по `Network` из `@atl/contracts`, инстансы машин/светофоров/
 пешеходов по `FrameBuffers` из `@atl/sim-worker`, плюс React-оболочка (раскладка, управление временем,
-глобальные параметры, HUD, легенда допущений, тултип) поверх неё (T-23). Сам ничего не считает про
-движение — только читает буферы кадров и метрики (`sim-core`/`sim-worker`).
+глобальные параметры, HUD, легенда допущений, тултип) поверх неё (T-23), плюс редактор сценариев
+(T-24: клик по перекрёстку/улице на карте, формы, вкладка «Сценарии», применение = пересборка сети
+`@atl/map-data`'s `applyOverrides` в главном потоке + перезапуск). Сам ничего не считает про движение —
+только читает буферы кадров и метрики (`sim-core`/`sim-worker`).
 
 ## Структура сцены
 
@@ -46,6 +48,15 @@ src/
                            signalStates считается по всем группам всех контроллеров по порядку
                            (включая пешеходные — они не рисуются, но не должны сбивать индексацию)
     pedestrians.ts            crosswalkPeds[i] точек (сферы r=0.3) вдоль geometry зебры i
+    picking.ts                 (T-24) `pickNodeOrLink(network, x, y)` — вынесенное из Tooltip.tsx
+                           (T-23) ближайший узел/линк на плоскости земли в локальных метрах;
+                           общий код для наведения (Tooltip) и клика (ScenariosTab/Viewport).
+                           `groundPointFromEvent` — курсор экрана -> точка на плоскости y=0
+    highlight.ts               (T-24) контур изменённых сценарием объектов: читает `provenance`
+                           прямо из скомпилированной сети (`"manual"` — то, что выставил
+                           `applyOverrides`), а не отдельный список overrides — лента вдоль
+                           `link.geometry` для линков, квадратная рамка для сигнализированных
+                           узлов, один прозрачный меш поверх дорог
   sim/
     client.ts                 SimClient из @atl/sim-worker: ?sim=stub — заглушка (T-06), иначе
                            реальное ядро; владеет interpolation-буфером и "дисплейными часами"
@@ -66,7 +77,14 @@ src/
                            `ViewportHandle` (аргумент `onReady`) отдаёт `{ engine, rig, network,
                            getSim, onSimReady }` — `onSimReady` стреляет один раз, когда прогрев
                            закончился и `sim.play(1)` уже вызван (не раньше — воркер иначе
-                           отклонит `runUntil`), `getSim` — синхронный геттер той же ручки
+                           отклонит `runUntil`), `getSim` — синхронный геттер той же ручки.
+                           (T-24) `scenarioOverrides`/`scenarioId` — если заданы, после загрузки
+                           сети статус на кадр переключается на "compiling" и `@atl/map-data`'s
+                           `applyOverrides` пересобирает сеть на главном потоке, ДО того как
+                           стартует воркер, — это и есть «применение сценария» (рестарт с тем же
+                           сидом достигается тем же ремонтом `<Viewport key={restartToken}>`, что
+                           и у T-23). `onSelect` — клик по канвасу (`scene/picking.ts`) сообщает
+                           наверх выбранный узел/линк для форм редактора
   sim/client.ts                 (T-23) `SimHandle` дополнен `setParams`/`requestReport`/`onMetrics`/
                            `onReport`/`latestFrameMeta()` — тонкие проброс-обёртки над `SimClient`
                            из `@atl/sim-worker`, плюс мутируемый снимок последнего кадра
@@ -82,7 +100,20 @@ src/
                            `metrics.windowS`, а HUD хочет чаще); отписывается перед каждой
                            новой подпиской. Restart = не «горячая» замена сима, а ремонт
                            `<Viewport key={restartToken}>` из ui/App.tsx — проще и надёжнее,
-                           чем учить Viewport переинициализировать бегущий воркер
+                           чем учить Viewport переинициализировать бегущий воркер. (T-24) добавлены
+                           `scenarios`/`activeScenarioId`/`appliedScenarioId`/`selection` и их
+                           экшены; `foldRestart` — общая функция, которую вызывают все четыре пути,
+                           заставляющие Viewport перемонтироваться (смена сети, пресет времени,
+                           «Перезапуск», «Запустить» сценарий), чтобы черновик restart-required
+                           параметров переносился одинаково везде (ревью T-23 про этот баг)
+    scenarios.ts                (T-24) CRUD сценариев и (де)сериализация в localStorage — чистые
+                           функции без React, стор лишь вызывает их. `upsertOverride`/
+                           `removeOverride` работают по ключу (`kind`, id сущности): одна форма —
+                           один override на сущность, повторное «Применить» замещает его целиком.
+                           `scenariosForNetwork` всегда добавляет синтетический `baselineScenario`
+                           первым; он никогда не лежит в localStorage. `parseImportedScenario`
+                           проверяет `ScenarioSchema` и `networkId` (иначе `ScenarioImportError`
+                           с кодом, а не текстом — текст живёт в `i18n/ru.ts`)
     assumptions.ts              `computeAssumptionShares(network)` — доля provenance="default"
                            по категориям прямо из загруженной сети (не из
                            `data/networks/*.assumptions.json`, которого нет для демо-сети).
@@ -110,7 +141,25 @@ src/
                            `<ParamsPanel/>`, легенда допущений
     Tooltip.tsx                    рейкаст курсора на плоскость y=0, ближайший узел/линк в
                            метрах (не меш-рейкаст: полотно дорог — общая геометрия без
-                           привязки атрибутов к id линка/узла, см. ARCHITECTURE.md)
+                           привязки атрибутов к id линка/узла, см. ARCHITECTURE.md); пикинг
+                           вынесен в `scene/picking.ts` (T-24), сам компонент не изменился
+    ScenariosTab.tsx                (T-24) вкладка «Сценарии»: список (создать/копировать/
+                           переименовать/удалить), активный сценарий, «Запустить» (переносит
+                           `activeScenarioId` в `appliedScenarioId` через тот же `foldRestart`,
+                           что и остальные рестарты), экспорт/импорт JSON (`<a>`-скачивание,
+                           `<input type=file>`), и — когда активен не-базовый сценарий и есть
+                           `selection` из стора — нужная форма. Для базового сценария формы
+                           скрыты (его нельзя редактировать, только скопировать в новый)
+    LinkForm.tsx                     (T-24) форма линка: сквозные полосы, скорость, левый/правый
+                           карман (0 = нет), выделенка (вкл/выкл, часы, окно въезда направо).
+                           Текущие значения читает прямо из `viewport.network` (полосы линка по
+                           `kind`/`turns`), при «Применить» отправляет **все** поля разом —
+                           `state/scenarios.ts`'s upsert замещает предыдущий override целиком
+    IntersectionForm.tsx             (T-24) форма перекрёстка: режим левого поворота на подход,
+                           зелёные секунды по группам (`controller.groups`/`.phases` уже несут
+                           `approachLinkId`/`section` — не нужен доступ к `@atl/map-data`'s
+                           `mainGroupId`/`arrowGroupId` из браузера), цикл, смещение, пешеходная
+                           фаза. Показывает `notEditableNode`, если узел не `signalized`
   i18n/ru.ts                   все строки интерфейса (единственное исключение — коды причин
                            в `@atl/contracts/causes.ts`, там это часть контракта, не UI)
 scripts/copy-networks.mjs      data/networks/*.gz -> public/networks/ (predev/prebuild)
@@ -136,10 +185,53 @@ scripts/copy-networks.mjs      data/networks/*.gz -> public/networks/ (predev/pr
    `packages/map-data/src/bboxes.ts`, а не импортирована оттуда: барель `@atl/map-data` тянет за
    собой импортёр/компилятор на `node:fs`/`node:crypto`, что незачем тащить в браузерный бандл
    ради двух строк-id (см. заметку ревью T-02 в карточке T-23 — там же был предложен этот вариант).
+   По той же причине `Viewport.tsx` берёт `applyOverrides` не из корня пакета, а из отдельного
+   subpath-экспорта `@atl/map-data/overrides` (T-24) — он ведёт прямо в
+   `packages/map-data/src/compiler/overrides.ts`, который не тянет ничего node-специфичного.
    Если файла нет (в т.ч. когда дев-сервер отвечает 200 с `index.html` вместо 404 — обычное
    поведение SPA-фолбэка) или сеть не прошла gzip-магию/`parseNetwork`, приложение показывает
    встроенную демо-сеть из `src/data/demo-network.ts` (сейчас так для `big` — компилятор ещё не
    прогонялся на большом полигоне), чтобы разработка не блокировалась на T-02.
+
+## Редактор сценариев (T-24)
+
+Вкладка «Сценарии» (`ScenariosTab`/`LinkForm`/`IntersectionForm`, `state/scenarios.ts`) редактирует
+`Scenario.overrides` (`@atl/contracts`) формами, без рисования геометрии (docs/DECISIONS.md D12):
+
+- **Клик по карте.** `Viewport`'s canvas слушает `click` и тем же пикингом, что и тултип
+  (`scene/picking.ts`), сообщает наверх выбранный узел/линк (`state/store.ts`'s `selection`).
+  `ScenariosTab` рендерит `IntersectionForm` для узла (сообщение `notEditableNode`, если он не
+  `signalized`) или `LinkForm` для линка; обе формы читают текущие значения прямо из
+  `viewport.network` — той сети, что сейчас реально нарисована (после применения сценария она уже
+  содержит его overrides, так что форма показывает актуальное состояние, а не «сырую» базовую сеть).
+- **«Применить» в форме** — сразу, без пересчёта и рестарта, обновляет override в
+  `state.scenarios`/localStorage (`upsertOverrideInActiveScenario`); базовый сценарий недоступен для
+  редактирования (`activeScenarioId === "baseline"` прячет обе формы за подсказкой).
+- **«Запустить» на вкладке** — единственное действие, которое реально пересчитывает и
+  перезапускает сеть: `appliedScenarioId = activeScenarioId` + `restartToken++` через тот же
+  `foldRestart`, что и остальные три пути ремонта `<Viewport>` (сеть, пресет времени,
+  «Перезапуск») — ревью T-23 просило одно место вместо копипасты, чтобы черновик
+  `draftRestartParams` не терялся молча ни на одном из путей. Сам пересчёт (главный поток,
+  индикатор "Применение сценария…") — внутри `Viewport`: `applyOverrides(network, overrides,
+  defaultSimConfig(configPatch), scenarioId)` из `@atl/map-data/overrides`.
+- **Подсветка (контур).** `scene/highlight.ts` рисует контур вокруг того, что реально изменилось,
+  читая `provenance === "manual"` прямо из уже скомпилированной сети — не отдельный список
+  overrides, значит не может разойтись с тем, что на самом деле нарисовано.
+- **Экспорт/импорт JSON.** `exportScenarioJson`/`parseImportedScenario` (`state/scenarios.ts`):
+  импорт проверяет `ScenarioSchema` и что `networkId` совпадает с текущей сетью, иначе
+  `ScenarioImportError` (код, не готовый текст — тексты в `i18n/ru.ts`, `scenarioImportError.*`).
+- **Хранение.** `localStorage["atl.scenarios.v1"]`, один плоский список поверх всех сетей;
+  `scenariosForNetwork` фильтрует по `networkId` и всегда добавляет синтетический
+  `baselineScenario` первым (он никогда не пишется в localStorage).
+
+### Тесты
+`packages/map-data/test/compiler/overrides.test.ts` — сама пересборка сети (см. README пакета).
+На стороне apps/web: `test/scenarios.test.ts` (CRUD + сериализация, без React), `test/picking.test.ts`
+(пикинг узла/линка на синтетических сетях), `test/ScenariosTab.test.tsx` (сквозной смоук-тест на
+`@testing-library/react`: клик -> форма -> «Применить» -> override в сторе, включая ветку
+`notEditableNode` и то, что формы скрыты для базового сценария) и добавленные в `test/store.test.ts`
+тесты на новые экшены стора (`createScenario`/`duplicateScenario`/.../`runActiveScenario` через
+`foldRestart`).
 
 ## Команды
 
@@ -149,8 +241,8 @@ pnpm --filter @atl/web build    # то же, что pnpm build из корня
 pnpm --filter @atl/web test     # vitest, окружение jsdom (T-23: смоук-тест TimeBar на @testing-library/react)
 ```
 
-## Вне объёма (T-23)
+## Вне объёма (T-24)
 
-Содержимое вкладок «Узкие места»/«Сценарии»/«Сравнение» — заглушки со ссылкой на T-25/T-24/T-26
-соответственно (сама навигация между вкладками уже работает). Тепловая карта — T-25. Здания/парки/
-реки — T-27.
+Содержимое вкладок «Узкие места»/«Сравнение» — заглушки со ссылкой на T-25/T-26 соответственно (сама
+навигация между вкладками уже работает). Тепловая карта — T-25. Здания/парки/реки — T-27. Панель А/Б
+сравнения двух сценариев в одном 3D-окне (D12) — T-26.
