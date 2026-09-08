@@ -121,3 +121,19 @@
    spawned 5750, completed 1204, dropped 65 (1.1%), retargeted 118 (2.1%). Большая сеть: spawned 9342,
    completed 907, dropped 76 (0.8%), retargeted 65 (0.7%). `retargetedTrips` действительно ловит дыры
    сети, как и написано в отчёте; вместе с `droppedVehicles` его стоит вывести в диагностику **(T-18)**.
+
+## Повторная выдача задачи (интегратор, 2026-09-08)
+
+Окно на T-12 было выдано второй раз, уже после слияния (`7d33d18` + постревью `31b1f7a`). Исполнитель
+кода не менял и запушил `task/T-12` в тот же коммит, что и `main` (`21417e3`), поэтому
+`git merge --no-ff origin/task/T-12` вернул `Already up to date` — слияние пустое. Приёмка перепроверена
+по коду, а не по отчёту: файлы `src/routing/{graph,dijkstra,trees}.ts` и `src/demand/{od,profile,spawner}.ts`
+на месте, N13 (`test/nuances/03-turns.test.ts:344`) и N21 (`test/nuances/06-routing-demand.test.ts:65`) —
+настоящие `it`, а не `it.todo`, критерий производительности закрыт `test/routing/performance.test.ts`,
+и этот тест реально выполняется (сеть `almaty-abay-small` закоммичена, `it.skipIf` не срабатывает):
+1231 мс, зелёный. `packages/contracts` не тронут. `pnpm check` зелёный: typecheck по 5 пакетам,
+biome 217 файлов, determinism ok, vitest 63 файла passed / 1 skipped (`07-metrics-detector.test.ts`,
+там три `todo` и ждёт T-18), 520 passed / 12 todo.
+
+Задача закрыта. Открытые пункты из ревью выше уже разнесены по карточкам-получателям: п.1 — в T-28 и
+(этим коммитом) в T-29, п.2 и п.6 — в T-18, п.3 — в T-24.
