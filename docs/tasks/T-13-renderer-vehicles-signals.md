@@ -40,3 +40,4 @@ UI-панели (T-23), тепловая карта (T-25), здания (T-27).
 - Временная страница `apps/web/src/DebugWorkerView.tsx` и проверка `?debug=worker` в `App.tsx` удаляются в этой задаче.
 - Воркер поддерживает `?sim=stub` в URL для заглушки-симуляции (`createStubSimulation` из `@atl/sim-worker`).
 - Позиция машины по `s`: `sampleAtS`/`laneAxis` из `apps/web/src/geometry/lane-geometry.ts` (если кадр несёт x/y/heading, они уже посчитаны ядром; использовать их напрямую, геометрию полос не пересчитывать).
+- Буфер кадра детачится сразу после возврата из `onFrame`: копировать x/y/heading синхронно внутри колбэка, не хранить `ev.frame`.

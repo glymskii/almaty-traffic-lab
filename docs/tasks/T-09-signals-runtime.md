@@ -41,3 +41,4 @@
 ## Заметки из ревью T-04 (учесть)
 - В `RuntimeNetwork` нет индексов `connector.signalGroupId` и `protection` (есть только плоский `signalGroupIds` для кадров): добавить `connSignalGroup`/`connProtection` (Int32Array/Uint8Array по трекам).
 - Стоп-линия реализуется как «виртуальное препятствие» в паттерне «минимум по препятствиям» (после правок T-04 в `computeAccelerations` есть `accelTowardObstacle`); не переписывать блок, а добавить препятствие.
+- В `crossroads({cycleS})` это бюджет зелёного, полный цикл считать через `cycleLengthS(controller)`.

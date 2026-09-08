@@ -44,7 +44,14 @@
 | `Gate`, `Attractor` | Спрос | ворота на узлах `kind: gate`; веса неотрицательны; сумма весов нормируется в рантайме |
 | `Building`, `Area`, `Waterway` | Рендер | не участвуют в симуляции |
 
-### Provenance
+#### Право проезда: `protection` против `conflicts[].priority`
+`Connector.protection` — классификация движения («есть ли сигнал, есть ли знак»), а **право проезда в конкретной точке
+всегда решает `ConflictPoint.priority`** этого коннектора: `this` — едем, `other` — уступаем, `signal` — решает контроллер.
+Два движения с `protection: priority` могут пересекаться (например, левый с главной против правого с главной на Т-образном
+узле); тогда в их `conflicts[]` стоит согласованная пара `this`/`other`. Рантайм (T-11) никогда не выводит право проезда
+из `protection`, только из `conflicts[]`.
+
+## Provenance
 `provenance: { [attr]: "osm" | "default" | "manual" }` у сущностей. Компилятор обязан отмечать как минимум:
 `Link.speedLimitKph`, `Link.laneIds` (число полос), `Lane.turns`, `Lane.busLane`, `Lane.startS` (карманы),
 `SignalController.phases`, `SignalController.leftTurnModes`, `BusRoute.headwayPeakS`, `BusStop.kind`,
