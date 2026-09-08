@@ -272,18 +272,16 @@ function createBusLetterTexture(): THREE.CanvasTexture {
   return texture;
 }
 
-/** Repeating "A" (автобус) glyphs painted along every bus lane. Skipped outside a browser (no canvas/document). */
-function buildBusLaneLetters(network: Network): THREE.Group | null {
+/**
+ * Repeating "A" glyphs (the Russian/Kazakh road marking for a dedicated bus lane) painted along
+ * every bus lane. Every glyph shares the same quad UVs and texture, so they merge into one mesh
+ * instead of one draw call per letter - a real network can have hundreds of these. Skipped outside
+ * a browser (no canvas/document).
+ */
+function buildBusLaneLetters(network: Network): THREE.Mesh | null {
   if (typeof document === "undefined") return null;
   const lanesById = new Map(network.lanes.map((lane) => [lane.id, lane]));
-  const material = new THREE.MeshBasicMaterial({
-    map: createBusLetterTexture(),
-    transparent: true,
-    depthWrite: false,
-    side: THREE.DoubleSide,
-  });
-  const group = new THREE.Group();
-  group.name = "bus-lane-letters";
+  const geometries: THREE.BufferGeometry[] = [];
 
   for (const link of network.links) {
     const laneCount = link.laneIds.length;
@@ -299,12 +297,22 @@ function buildBusLaneLetters(network: Network): THREE.Group | null {
         if (s > lane.endS) continue;
         const { point, heading } = sampleAtS(axis, s);
         const size = lane.widthM * LETTER_SIZE_FACTOR;
-        const geometry = buildQuadGeometry(point, size, size, heading, LETTER_HEIGHT_M);
-        group.add(new THREE.Mesh(geometry, material));
+        geometries.push(buildQuadGeometry(point, size, size, heading, LETTER_HEIGHT_M));
       }
     }
   }
-  return group.children.length > 0 ? group : null;
+
+  const merged = mergeRibbons(geometries);
+  if (!merged) return null;
+  const material = new THREE.MeshBasicMaterial({
+    map: createBusLetterTexture(),
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  const mesh = new THREE.Mesh(merged, material);
+  mesh.name = "bus-lane-letters";
+  return mesh;
 }
 
 /** Every painted marking for `network`, as a scene group ready to add next to the road surfaces. */
