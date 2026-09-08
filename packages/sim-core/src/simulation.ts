@@ -34,6 +34,7 @@ import { ROUTE_COPIES, RouteTrees } from "./routing/trees.ts";
 import { SimClock } from "./runtime/clock.ts";
 import { IntersectionRuntime } from "./runtime/intersections.ts";
 import { LaneRuntime } from "./runtime/lanes.ts";
+import { yieldCauseByTurn } from "./runtime/merges.ts";
 import { CLASS_COUNT, RuntimeNetwork } from "./runtime/network.ts";
 import { SignalRuntime } from "./runtime/signals.ts";
 import { TrajectoryHash } from "./runtime/trajectory-hash.ts";
@@ -267,8 +268,6 @@ const DEST_DRAW_ATTEMPTS = 6;
 
 const CAUSE_LANE_CHANGE_WAIT = causeCode("lane_change_wait");
 const CAUSE_POCKET_SPILLBACK = causeCode("pocket_spillback");
-const CAUSE_GAP_LEFT_TURN = causeCode("gap_left_turn");
-const CAUSE_YIELD_PRIORITY = causeCode("yield_priority");
 const CAUSE_GRIDLOCK = causeCode("gridlock");
 const CAUSE_DOWNSTREAM_SPILLBACK = causeCode("downstream_spillback");
 /** T-14: a scheduled bus stop dwell and, for the vehicles queued behind a dwelling bus, its cause. */
@@ -1408,10 +1407,7 @@ class SimulationImpl implements Simulation {
     const count = cf.conflictCount[conn] as number;
     if (count === 0) return Number.POSITIVE_INFINITY;
     const pool = this.pool;
-    const yieldCause =
-      (this.runtime.connTurn[conn] as number) === TurnCode.left
-        ? CAUSE_GAP_LEFT_TURN
-        : CAUSE_YIELD_PRIORITY;
+    const yieldCause = yieldCauseByTurn(this.runtime.connTurn[conn] as number);
     const lengthI = pool.length[i] as number;
     // Accepted gap = the driver's critical gap plus the time it needs to clear the point from the
     // place it waits: a gap that is only just long enough to start is not long enough to finish.
