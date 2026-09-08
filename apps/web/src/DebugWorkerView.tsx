@@ -1,6 +1,6 @@
 import { baselineScenario, defaultSimConfig, parseNetwork } from "@atl/contracts";
 import type { FrameEvent } from "@atl/sim-worker";
-import { createSimClient } from "@atl/sim-worker";
+import { createSimClient, createStubSimWorker } from "@atl/sim-worker";
 import { useEffect, useRef, useState } from "react";
 
 /**
@@ -35,10 +35,9 @@ export function DebugWorkerView() {
   const [status, setStatus] = useState("подключение к воркеру...");
 
   useEffect(() => {
-    const workerUrl = new URL("../../../packages/sim-worker/src/worker.ts", import.meta.url);
-    workerUrl.search = "sim=stub";
-    const worker = new Worker(workerUrl, { type: "module" });
-    const client = createSimClient({ createWorker: () => worker, frameRateHz: 30 });
+    // Never construct the Worker's URL here: it must be built inside @atl/sim-worker itself
+    // (see create-worker.ts) or it silently fails to start once Vite bundles for production.
+    const client = createSimClient({ createWorker: createStubSimWorker, frameRateHz: 30 });
 
     const offError = client.onError((message, fatal) => {
       setStatus(`ошибка${fatal ? " (fatal)" : ""}: ${message}`);

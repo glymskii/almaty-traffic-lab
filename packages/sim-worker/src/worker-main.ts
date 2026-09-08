@@ -25,6 +25,13 @@ const MAX_STEPS_PER_ITERATION = 50;
 /** "progress каждые 2 симуляционные минуты" (docs/tasks/T-06). */
 const PROGRESS_INTERVAL_SIM_S = 120;
 const RT_FACTOR_EMA_ALPHA = 0.2;
+/**
+ * Caps how much wall-clock time a single tick may bank into the step accumulator. Without this,
+ * a throttled hidden tab (browsers slow setTimeout there) would report a huge elapsedS on the
+ * next tick and spend many iterations at MAX_STEPS_PER_ITERATION trying to "catch up" instead of
+ * honestly falling behind (rtFactor).
+ */
+const MAX_ELAPSED_S = 0.5;
 
 type WorkerState = "idle" | "ready" | "playing" | "runningUntil" | "paused" | "disposed";
 
@@ -176,8 +183,12 @@ export function createWorkerMain(opts: WorkerMainOptions): WorkerMain {
       fail("requestReport before init", false);
       return;
     }
-    post({ type: "report", report: sim.report() });
-    lastReportSimTimeS = sim.simTimeS;
+    try {
+      post({ type: "report", report: sim.report() });
+      lastReportSimTimeS = sim.simTimeS;
+    } catch (err) {
+      fail(`report failed: ${errorMessage(err)}`, true);
+    }
   }
 
   function handleDispose(): void {
@@ -199,7 +210,7 @@ export function createWorkerMain(opts: WorkerMainOptions): WorkerMain {
       return;
     }
     const nowMs = Date.now();
-    const elapsedS = lastTickMs === 0 ? 0 : Math.max(0, (nowMs - lastTickMs) / 1000);
+    const elapsedS = lastTickMs === 0 ? 0 : clamp((nowMs - lastTickMs) / 1000, 0, MAX_ELAPSED_S);
     lastTickMs = nowMs;
 
     if (state === "playing") tickPlaying(activeSim, elapsedS, nowMs);
@@ -207,38 +218,50 @@ export function createWorkerMain(opts: WorkerMainOptions): WorkerMain {
   }
 
   function tickPlaying(s: Simulation, elapsedS: number, nowMs: number): void {
-    accumulatorS += elapsedS * speedFactor;
-    let steps = 0;
-    while (accumulatorS >= s.config.dtS && steps < MAX_STEPS_PER_ITERATION) {
-      s.step();
-      accumulatorS -= s.config.dtS;
-      steps++;
+    try {
+      accumulatorS += elapsedS * speedFactor;
+      let steps = 0;
+      while (accumulatorS >= s.config.dtS && steps < MAX_STEPS_PER_ITERATION) {
+        s.step();
+        accumulatorS -= s.config.dtS;
+        steps++;
+      }
+      if (elapsedS > 0 && speedFactor > 0) {
+        const achieved = (steps * s.config.dtS) / elapsedS / speedFactor;
+        rtFactor = rtFactor + RT_FACTOR_EMA_ALPHA * (clamp(achieved, 0, 2) - rtFactor);
+      }
+      maybeSendFrame(s, nowMs);
+      maybeSendMetrics(s);
+      maybeSendReport(s);
+    } catch (err) {
+      // A throw from the kernel mid-loop would otherwise escape the setTimeout callback and
+      // hang the worker silently (no error message, no more frames, no reschedule).
+      fail(`simulation step failed: ${errorMessage(err)}`, true);
+      return;
     }
-    if (elapsedS > 0 && speedFactor > 0) {
-      const achieved = (steps * s.config.dtS) / elapsedS / speedFactor;
-      rtFactor = rtFactor + RT_FACTOR_EMA_ALPHA * (clamp(achieved, 0, 2) - rtFactor);
-    }
-    maybeSendFrame(s, nowMs);
-    maybeSendMetrics(s);
-    maybeSendReport(s);
     scheduleIteration();
   }
 
   function tickRunUntil(s: Simulation): void {
-    let steps = 0;
-    while (s.simTimeS < runUntilTargetS && steps < MAX_STEPS_PER_ITERATION) {
-      s.step();
-      steps++;
-      if (s.simTimeS - lastProgressSimTimeS >= PROGRESS_INTERVAL_SIM_S) {
-        lastProgressSimTimeS = s.simTimeS;
-        post({ type: "progress", simTimeS: s.simTimeS, targetSimTimeS: runUntilTargetS });
+    try {
+      let steps = 0;
+      while (s.simTimeS < runUntilTargetS && steps < MAX_STEPS_PER_ITERATION) {
+        s.step();
+        steps++;
+        if (s.simTimeS - lastProgressSimTimeS >= PROGRESS_INTERVAL_SIM_S) {
+          lastProgressSimTimeS = s.simTimeS;
+          post({ type: "progress", simTimeS: s.simTimeS, targetSimTimeS: runUntilTargetS });
+        }
       }
-    }
-    maybeSendMetrics(s);
-    maybeSendReport(s);
-    if (s.simTimeS >= runUntilTargetS) {
-      state = "paused";
-      post({ type: "paused", simTimeS: s.simTimeS });
+      maybeSendMetrics(s);
+      maybeSendReport(s);
+      if (s.simTimeS >= runUntilTargetS) {
+        state = "paused";
+        post({ type: "paused", simTimeS: s.simTimeS });
+        return;
+      }
+    } catch (err) {
+      fail(`simulation step failed: ${errorMessage(err)}`, true);
       return;
     }
     scheduleIteration();

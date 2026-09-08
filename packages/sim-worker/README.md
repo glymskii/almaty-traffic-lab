@@ -11,8 +11,11 @@ Web Worker вокруг `@atl/sim-core`: протокол сообщений (`@
 | Файл | Роль |
 |---|---|
 | `src/worker-main.ts` | Чистая функция `createWorkerMain({ post, createSimulation? })`: состояние, цикл шагов, ping-pong буферов. Без `self` — тестируется в node. |
-| `src/worker.ts` | Тонкая обёртка `worker-main` над `self` для браузера. `?sim=stub` в URL воркера включает `StubSimulation` вместо `@atl/sim-core`. |
-| `src/client.ts` | `createSimClient({ createWorker, ... })`: промисы `init`/`runUntil`, подписки, автоматический `returnFrame`/`returnMetrics`. |
+| `src/worker-bootstrap.ts` | Общая обвязка `worker-main` над реальным `self`; используется `worker.ts` и `worker-stub.ts`, чтобы не дублировать `postMessage`/`onmessage`. |
+| `src/worker.ts` | Реальный воркер: `@atl/sim-core`. |
+| `src/worker-stub.ts` | Debug-воркер: `StubSimulation` вместо `@atl/sim-core` (только для `/?debug=worker`). |
+| `src/create-worker.ts` | `createSimWorker()` / `createStubSimWorker()` — единственный способ создать настоящий `Worker`. Каждый — это ровно один инлайновый вызов `new Worker(new URL("./worker*.ts", import.meta.url), { type: "module" })`: и разбиение на `const url = new URL(...)`, и вызов из другого пакета (через `@atl/name` или тем более относительным путём через границу пакета) ломают статическое распознавание этого паттерна в Vite — в `vite dev` не заметно (файл читается напрямую с диска), а в `vite build` воркер тихо не стартует (сырой `.ts` инлайнится как `data:`-URL). |
+| `src/client.ts` | `createSimClient({ createWorker, ... })`: промисы `init`/`runUntil`, подписки, автоматический `returnFrame`/`returnMetrics`, устойчив к исключениям в колбэках. |
 | `src/stub-simulation.ts` | `createStubSimulation`: 500 точек по кругу, детерминированная функция от `simTimeS`. Подменяет `@atl/sim-core` до T-04. |
 | `src/index.ts` | Публичный экспорт пакета. |
 
@@ -71,6 +74,13 @@ detached; переиспользовать его можно только пос
 не завязаны на `playing`/`runningUntil` — сэмплируются по `simTimeS`, поэтому продолжают идти и во
 время перемотки `runUntil`.
 
+**Для T-13 (рендер):** колбэк `onFrame` получает `ev.frame` только на время своего вызова — сразу
+после возврата `client.ts` отправляет его назад в воркер с transfer, и типизированные массивы
+detach'атся у получателя тоже. Рендер обязан **синхронно** скопировать нужные поля (`x`, `y`,
+`heading`, ...) внутри самого колбэка; хранить `ev.frame` (или его массивы) между кадрами, в
+замыкании или в состоянии компонента нельзя — к следующему кадру буфер уже не тот объект и не та
+память.
+
 ## `RUNTIME_SAFE_PARAM_PATHS`
 
 `setParams` разбирает патч на пути вида `"demand.multiplier"` и сравнивает с
@@ -82,9 +92,10 @@ detached; переиспользовать его можно только пос
 `createStubSimulation` реализует интерфейс `Simulation`, но не читает `network`: 500 машин движутся
 по окружности, позиция — чистая функция `simTimeS` (без интегрирования, без дрейфа). Нужна, чтобы
 протокол воркера и будущий рендер (T-13) можно было тестировать/показывать до готовности реального
-ядра (T-04). `worker.ts` выбирает её вместо `@atl/sim-core` по `?sim=stub` в URL воркера —
-`apps/web/src/DebugWorkerView.tsx` (страница `/?debug=worker`) использует это, чтобы показать
-движение точек живьём; страница временная и уйдёт вместе с T-13.
+ядра (T-04). `worker-stub.ts` (свой воркер-энтрипоинт, см. выше) использует её вместо
+`@atl/sim-core` — `apps/web/src/DebugWorkerView.tsx` (страница `/?debug=worker`) создаёт его через
+`createStubSimWorker()`, чтобы показать движение точек живьём; страница временная и уйдёт вместе
+с T-13.
 
 ## Тесты
 

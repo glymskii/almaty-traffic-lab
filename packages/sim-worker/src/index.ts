@@ -5,6 +5,7 @@ export {
   type SimClient,
   type SimClientOptions,
 } from "./client.ts";
+export { createSimWorker, createStubSimWorker } from "./create-worker.ts";
 export { createStubSimulation } from "./stub-simulation.ts";
 export {
   createWorkerMain,
