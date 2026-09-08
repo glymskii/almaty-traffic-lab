@@ -1,0 +1,69 @@
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: system-ui, sans-serif;
+  color: #1a1a1a;
+}
+
+.app-shell {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+}
+
+.top-bar {
+  z-index: 1;
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 14px;
+  background: #1f2124;
+  color: #e8e6df;
+  font-size: 13px;
+}
+
+.top-bar-title {
+  font-weight: 600;
+}
+
+.top-bar-attribution {
+  opacity: 0.7;
+}
+
+.viewport {
+  position: relative;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.viewport canvas {
+  display: block;
+}
+
+.viewport-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #4a4d52;
+  font-size: 14px;
+  pointer-events: none;
+}
+
+.street-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #2a2a28;
+  white-space: nowrap;
+  user-select: none;
+  text-shadow:
+    0 0 3px rgba(255, 255, 255, 0.9),
+    0 0 3px rgba(255, 255, 255, 0.9);
+}
