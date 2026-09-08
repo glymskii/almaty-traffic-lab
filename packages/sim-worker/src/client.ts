@@ -21,7 +21,12 @@ export interface FrameEvent {
 }
 
 export interface SimClientOptions {
-  /** Factory so the app controls the Worker URL/bundling: () => new Worker(new URL("./worker.ts", import.meta.url), { type: "module" }) */
+  /**
+   * Factory so the app controls Worker construction/bundling. Use `createSimWorker` from this
+   * package (`() => createSimWorker()`) rather than constructing `new Worker(new URL(...))`
+   * yourself: the URL must be built inside sim-worker's own source (see create-worker.ts) for
+   * Vite to bundle it correctly in `vite build`, not just `vite dev`.
+   */
   createWorker: () => Worker;
   frameBufferCount?: number;
   frameRateHz?: number;
@@ -69,6 +74,20 @@ export function createSimClient(opts: SimClientOptions): SimClient {
     worker.postMessage(msg, transfer);
   }
 
+  /**
+   * Runs one app callback in isolation: a throwing listener must not stop the other listeners
+   * of the same event, and must not prevent the caller from returning the frame/metrics buffer
+   * that follows (an un-returned buffer would silently starve the worker's ping-pong pool).
+   */
+  function safeNotify(run: () => void, label: string): void {
+    try {
+      run();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      for (const cb of errorListeners) cb(`${label} listener threw: ${message}`, false);
+    }
+  }
+
   worker.onmessage = (ev: MessageEvent<WorkerToMain>) => {
     if (disposed) return;
     const msg = ev.data;
@@ -85,28 +104,34 @@ export function createSimClient(opts: SimClientOptions): SimClient {
       case "frame": {
         const frame = msg.frame;
         for (const cb of frameListeners) {
-          cb({
-            frame,
-            simTimeS: msg.simTimeS,
-            timeOfDayMin: msg.timeOfDayMin,
-            rtFactor: msg.rtFactor,
-            vehicleCount: msg.vehicleCount,
-          });
+          safeNotify(
+            () =>
+              cb({
+                frame,
+                simTimeS: msg.simTimeS,
+                timeOfDayMin: msg.timeOfDayMin,
+                rtFactor: msg.rtFactor,
+                vehicleCount: msg.vehicleCount,
+              }),
+            "onFrame",
+          );
         }
         send({ type: "returnFrame", frame }, frameTransferList(frame));
         break;
       }
       case "metrics": {
         const frame = msg.frame;
-        for (const cb of metricsListeners) cb(frame);
+        for (const cb of metricsListeners) safeNotify(() => cb(frame), "onMetrics");
         send({ type: "returnMetrics", frame }, metricsTransferList(frame));
         break;
       }
       case "report":
-        for (const cb of reportListeners) cb(msg.report);
+        for (const cb of reportListeners) safeNotify(() => cb(msg.report), "onReport");
         break;
       case "progress":
-        for (const cb of progressListeners) cb(msg.simTimeS, msg.targetSimTimeS);
+        for (const cb of progressListeners) {
+          safeNotify(() => cb(msg.simTimeS, msg.targetSimTimeS), "onProgress");
+        }
         break;
       case "paused": {
         if (runUntilResolve) {
@@ -118,6 +143,9 @@ export function createSimClient(opts: SimClientOptions): SimClient {
         break;
       }
       case "error": {
+        // The protocol carries no correlation id (frozen contract), so one error rejects
+        // whichever of init/runUntil is in flight; in practice only one is ever pending at once
+        // (worker-main only accepts one loop mode at a time).
         for (const cb of errorListeners) cb(msg.message, msg.fatal);
         if (readyReject) {
           const reject = readyReject;

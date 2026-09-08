@@ -1,5 +1,6 @@
-import type { SimConfigPatch, WorkerToMain } from "@atl/contracts";
+import type { FrameBuffers, MetricsFrame, SimConfigPatch, WorkerToMain } from "@atl/contracts";
 import { baselineScenario, defaultSimConfig, frameTransferList } from "@atl/contracts";
+import type { CreateSimulationOptions, Simulation } from "@atl/sim-core";
 import { describe, expect, it } from "vitest";
 import { straightRoad } from "../../sim-core/test/fixtures/builders.ts";
 import { createSimClient } from "../src/client.ts";
@@ -23,6 +24,52 @@ function messagesOfType<T extends WorkerToMain["type"]>(
   type: T,
 ): Extract<WorkerToMain, { type: T }>[] {
   return messages.filter((m): m is Extract<WorkerToMain, { type: T }> => m.type === type);
+}
+
+/**
+ * Wraps StubSimulation but makes step() throw after `n` calls, to exercise worker-main's
+ * fatal-error handling when the kernel itself misbehaves mid-loop. Delegates everything else
+ * (via getters for the live properties, since a plain object spread would freeze simTimeS at
+ * construction time instead of tracking the wrapped simulation).
+ */
+function createStepFailsAfter(n: number): (opts: CreateSimulationOptions) => Simulation {
+  return (opts) => {
+    const inner = createStubSimulation(opts);
+    let stepCount = 0;
+    return {
+      get network() {
+        return inner.network;
+      },
+      get config() {
+        return inner.config;
+      },
+      get scenarioId() {
+        return inner.scenarioId;
+      },
+      get simTimeS() {
+        return inner.simTimeS;
+      },
+      get timeOfDayMin() {
+        return inner.timeOfDayMin;
+      },
+      step() {
+        stepCount++;
+        if (stepCount > n) throw new Error("boom: simulated kernel crash");
+        inner.step();
+      },
+      runUntil: (targetSimTimeS: number) => inner.runUntil(targetSimTimeS),
+      vehicleCount: () => inner.vehicleCount(),
+      writeFrame: (frame: FrameBuffers) => inner.writeFrame(frame),
+      segments: () => inner.segments(),
+      signalGroupIds: () => inner.signalGroupIds(),
+      crosswalkIds: () => inner.crosswalkIds(),
+      writeMetrics: (frame?: MetricsFrame) => inner.writeMetrics(frame),
+      report: () => inner.report(),
+      setParams: (patch: SimConfigPatch) => inner.setParams(patch),
+      trajectoryHash: () => inner.trajectoryHash(),
+      tripStats: () => inner.tripStats(),
+    };
+  };
 }
 
 describe("sim-worker protocol", () => {
@@ -178,5 +225,52 @@ describe("sim-worker protocol", () => {
     await waitUntil(() => errors.some((e) => e.fatal));
 
     expect(() => client.dispose()).not.toThrow();
+  });
+
+  it("reports a fatal error when the kernel throws mid-loop, and dispose stays safe", async () => {
+    const worker = createFakeWorker(createStepFailsAfter(2));
+    const client = createSimClient({ createWorker: () => worker });
+    const { network, config, scenario } = testSetup({ dtS: 0.1 });
+    await client.init(network, config, scenario);
+
+    const errors: Array<{ message: string; fatal: boolean }> = [];
+    client.onError((message, fatal) => errors.push({ message, fatal }));
+
+    client.play(1000);
+    await waitUntil(() => errors.some((e) => e.fatal));
+
+    expect(() => client.dispose()).not.toThrow();
+  });
+
+  it("a throwing onFrame listener does not stop the frame stream or buffer return", async () => {
+    const worker = createFakeWorker(createStubSimulation);
+    const client = createSimClient({
+      createWorker: () => worker,
+      frameBufferCount: 2,
+      frameRateHz: 30,
+    });
+    const { network, config, scenario } = testSetup({ dtS: 0.1 });
+    await client.init(network, config, scenario);
+
+    let goodFrames = 0;
+    client.onFrame(() => {
+      throw new Error("boom in onFrame");
+    });
+    client.onFrame(() => {
+      goodFrames++;
+    });
+
+    const errors: Array<{ message: string; fatal: boolean }> = [];
+    client.onError((message, fatal) => errors.push({ message, fatal }));
+
+    client.play(100);
+    await wait(200);
+    client.pause();
+
+    expect(goodFrames).toBeGreaterThanOrEqual(3);
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors.every((e) => !e.fatal)).toBe(true);
+
+    client.dispose();
   });
 });
