@@ -529,7 +529,10 @@ class SimulationImpl implements Simulation {
         this.pendingLeader[i] = cur;
         return cand;
       }
-      this.laneChangeBlocked[i] = 1;
+      // Only an urgent change (inside `laneSelectionLookaheadM`, i.e. bias > 0) counts as waiting:
+      // further out the vehicle is not trying to merge yet, so its braking is the leader's doing and
+      // `lane_change_wait` would poison the cause histogram (T-18).
+      if (bias > 0) this.laneChangeBlocked[i] = 1;
       return -1;
     }
     // A discretionary change is re-considered every DISCRETIONARY_EVERY steps, staggered by slot:
