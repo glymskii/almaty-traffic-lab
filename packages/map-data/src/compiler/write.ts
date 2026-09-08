@@ -1,9 +1,18 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { type Network, parseNetwork } from "@atl/contracts";
 import type { OsmSnapshot } from "../importer/index.ts";
 import type { CompileReport } from "./index.ts";
+
+/** Repository root; this file lives in packages/map-data/src/compiler. */
+export const REPO_ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
+
+/** CLI paths are relative to the repository root, whatever pnpm's working directory is. */
+export function fromRepoRoot(path: string): string {
+  return isAbsolute(path) ? path : resolve(REPO_ROOT, path);
+}
 
 /** Compact JSON; key order follows the zod schemas, so the same network gives the same bytes. */
 export function serializeNetwork(network: Network): string {

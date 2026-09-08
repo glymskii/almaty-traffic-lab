@@ -152,40 +152,59 @@ interface LaneCountResolution {
  * `lanes:<dir>` → `lanes` (one-way: all; two-way: minus the other direction's explicit tag, else split
  * with the bigger half in the way's forward direction) → class default.
  */
+function turnLaneEntries(value: string | undefined): number | undefined {
+  return value === undefined ? undefined : value.split("|").length;
+}
+
 function resolveLaneCount(
   tags: Tags,
   travel: TravelDirection,
   ctx: DirectionParseContext,
 ): LaneCountResolution {
+  const osm = (count: number): LaneCountResolution => ({
+    count,
+    provenance: "osm",
+    source: "lanes",
+  });
   const wd = wayDirectionOf(travel, ctx);
+  const otherWd: TravelDirection = wd === "forward" ? "backward" : "forward";
   const own = tags[`lanes:${wd}`];
   if (own !== undefined) {
     const n = parsePositiveInt(own);
-    if (n !== undefined) return { count: n, provenance: "osm", source: "lanes" };
+    if (n !== undefined) return osm(n);
     ctx.warn(`way ${ctx.wayId}: cannot parse lanes:${wd}="${own}"`);
   }
-  const total = tags.lanes;
+  const totalRaw = tags.lanes;
+  const total = parsePositiveInt(totalRaw);
+  if (totalRaw !== undefined && total === undefined)
+    ctx.warn(`way ${ctx.wayId}: cannot parse lanes="${totalRaw}"`);
   if (total !== undefined) {
-    const n = parsePositiveInt(total);
-    if (n === undefined) {
-      ctx.warn(`way ${ctx.wayId}: cannot parse lanes="${total}"`);
+    const other = parsePositiveInt(tags[`lanes:${otherWd}`]);
+    if (other !== undefined) {
+      // `lanes` minus the other direction's explicit count; one-way streets sometimes carry a stale
+      // lanes:backward, in which case `lanes` alone wins.
+      if (total - other >= 1) return osm(total - other);
+      if (ctx.oneway) return osm(total);
+      ctx.warn(
+        `way ${ctx.wayId}: lanes=${total} leaves no lane ${wd} after lanes:${otherWd}=${other}; using the class default`,
+      );
     } else if (ctx.oneway) {
-      return { count: n, provenance: "osm", source: "lanes" };
+      return osm(total);
     } else {
-      const otherWd: TravelDirection = wd === "forward" ? "backward" : "forward";
-      const other = parsePositiveInt(tags[`lanes:${otherWd}`]);
-      if (other !== undefined) {
-        if (n - other >= 1) return { count: n - other, provenance: "osm", source: "lanes" };
-        ctx.warn(
-          `way ${ctx.wayId}: lanes=${n} leaves no lane ${wd} after lanes:${otherWd}=${other}; using the class default`,
-        );
-      } else {
-        const share = wd === "forward" ? Math.ceil(n / 2) : Math.floor(n / 2);
-        if (share >= 1) return { count: share, provenance: "osm", source: "lanes" };
-        ctx.warn(
-          `way ${ctx.wayId}: lanes=${n} on a two-way street; assuming one lane ${wd} (default)`,
-        );
-      }
+      // Per-lane tags reveal how the total splits between the directions.
+      const ownTurns = turnLaneEntries(tags[`turn:lanes:${wd}`]);
+      const otherTurns = turnLaneEntries(tags[`turn:lanes:${otherWd}`]);
+      if (ownTurns !== undefined && otherTurns !== undefined && ownTurns + otherTurns === total)
+        return osm(ownTurns);
+      if (ownTurns !== undefined && otherTurns === undefined && ownTurns <= total - 1)
+        return osm(ownTurns);
+      if (ownTurns === undefined && otherTurns !== undefined && total - otherTurns >= 1)
+        return osm(total - otherTurns);
+      const share = wd === "forward" ? Math.ceil(total / 2) : Math.floor(total / 2);
+      if (share >= 1) return osm(share);
+      ctx.warn(
+        `way ${ctx.wayId}: lanes=${total} on a two-way street; assuming one lane ${wd} (default)`,
+      );
     }
   }
   return {
@@ -258,17 +277,25 @@ function resolveBusLane(
       if (raw.trim() !== "0") ctx.warn(`way ${ctx.wayId}: cannot parse ${base}="${raw}"`);
       continue;
     }
-    if (own === undefined && !ctx.oneway)
+    let perDirection = n;
+    if (own === undefined && !ctx.oneway) {
+      // An undirected count on a two-way street covers both directions; a single lane is ambiguous.
+      if (n === 1)
+        ctx.warn(
+          `way ${ctx.wayId}: ${base}=1 on a two-way street without direction; assuming a bus lane in both directions`,
+        );
+      perDirection = Math.ceil(n / 2);
+    }
+    if (perDirection > 1)
       ctx.warn(
-        `way ${ctx.wayId}: ${base}=${raw} on a two-way street without direction; assuming a bus lane in both directions`,
+        `way ${ctx.wayId}: ${base}=${n} means ${perDirection} bus lanes ${travel}; only one is modelled`,
       );
-    if (n > 1)
-      ctx.warn(`way ${ctx.wayId}: ${base}=${n}; only one bus lane per direction is modelled`);
     return { designated: true, misplaced: false };
   }
   const check = (value: string | undefined, tag: string): boolean => {
     if (value === undefined || value === "no" || value === "none") return false;
-    if (value === "lane") return true;
+    // Almaty mappers write busway:left=yes as often as =lane.
+    if (value === "lane" || value === "yes") return true;
     ctx.warn(`way ${ctx.wayId}: ${tag}=${value} is not modelled (only busway=lane)`);
     return false;
   };
@@ -299,10 +326,18 @@ export function parseDirectionAttrs(
   let laneCountSource = lc.source;
 
   let turns = resolveTurnLanes(tags, travel, ctx);
-  if (turns !== undefined && laneCountSource === "default") {
-    laneCount = turns.length;
-    laneCountProvenance = "osm";
-    laneCountSource = "turn_lanes";
+  if (turns !== undefined) {
+    const contradiction = ctx.oneway && laneCountSource === "lanes" && turns.length !== laneCount;
+    if (contradiction)
+      ctx.warn(
+        `way ${ctx.wayId}: lanes=${laneCount} contradicts turn:lanes with ${turns.length} entries on a one-way street; using turn:lanes`,
+      );
+    if (laneCountSource === "default" || contradiction) {
+      // Per-lane tags are the more deliberate statement; on one-way streets a stale `lanes` loses to them.
+      laneCount = turns.length;
+      laneCountProvenance = "osm";
+      laneCountSource = "turn_lanes";
+    }
   }
 
   const bus = resolveBusLane(tags, travel, ctx);

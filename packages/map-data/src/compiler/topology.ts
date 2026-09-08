@@ -4,8 +4,12 @@ import type { DirectionAttrs } from "./lanes.ts";
 import type { GraphVertex, OsmGraph, WayAttrs, WayPiece } from "./osm-graph.ts";
 import type { Warn } from "./tags.ts";
 
-/** A traffic_signals node this close (along the road) to a junction is the junction's signal. */
-export const SIGNAL_COLLAPSE_M = 15;
+/**
+ * A traffic_signals node this close (along the road) to a junction is the junction's signal.
+ * Card T-02 suggested 15 m; on Almaty's avenues the per-approach signal nodes (stop lines of
+ * dual carriageways) sit 17..26 m from the junction node, so 30 m folds them as intended.
+ */
+export const SIGNAL_COLLAPSE_M = 30;
 /** Segments shorter than this (duplicate OSM nodes) are dropped. */
 const MIN_SEGMENT_M = 0.01;
 
@@ -105,6 +109,21 @@ function reverseSeg(s: Seg): Seg {
     parts: s.parts.map((p) => ({ ...p, reversed: !p.reversed })),
     lengthM: s.lengthM,
   };
+}
+
+/** Orients `first` to end at `key` and `second` to start there; only two-way segments may be reversed. */
+function orientPair(first: Seg, second: Seg, key: string): [Seg, Seg] | undefined {
+  let head = first;
+  if (segTo(head) !== key) {
+    if (head.attrs.oneway) return undefined;
+    head = reverseSeg(head);
+  }
+  let tail = second;
+  if (segFrom(tail) !== key) {
+    if (tail.attrs.oneway) return undefined;
+    tail = reverseSeg(tail);
+  }
+  return [head, tail];
 }
 
 function directionSignature(d: DirectionAttrs): unknown[] {
@@ -314,16 +333,9 @@ export function buildTopology(graph: OsmGraph, warn: Warn): Topology {
     const a = segs.get(ia);
     const b = segs.get(ib);
     if (a === undefined || b === undefined) continue;
-    let first = a;
-    if (segTo(first) !== key) {
-      if (first.attrs.oneway) continue;
-      first = reverseSeg(first);
-    }
-    let second = b;
-    if (segFrom(second) !== key) {
-      if (second.attrs.oneway) continue;
-      second = reverseSeg(second);
-    }
+    const pair = orientPair(a, b, key) ?? orientPair(b, a, key);
+    if (pair === undefined) continue;
+    const [first, second] = pair;
     if (segFrom(first) === segTo(second)) continue;
     if (signatureOf(first.attrs) !== signatureOf(second.attrs)) continue;
     const merged: Seg = {

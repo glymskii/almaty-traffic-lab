@@ -2,19 +2,27 @@ import { existsSync } from "node:fs";
 import { defaultSimConfig } from "@atl/contracts";
 import { getBBox } from "../bboxes.ts";
 import { compileNetwork } from "../compiler/index.ts";
-import { defaultOutputPaths, readSnapshotFile, writeCompileOutputs } from "../compiler/write.ts";
+import {
+  defaultOutputPaths,
+  fromRepoRoot,
+  readSnapshotFile,
+  writeCompileOutputs,
+} from "../compiler/write.ts";
 import { parseArgs } from "./args.ts";
 
 const args = parseArgs(process.argv.slice(2));
 const bboxKey = typeof args.bbox === "string" ? args.bbox : "small";
 const bbox = getBBox(bboxKey);
-const snapshotPath =
-  typeof args.snapshot === "string" ? args.snapshot : `data/osm/${bbox.id}/snapshot.json.gz`;
+const snapshotPath = fromRepoRoot(
+  typeof args.snapshot === "string" ? args.snapshot : `data/osm/${bbox.id}/snapshot.json.gz`,
+);
 const paths = defaultOutputPaths(bbox.id);
 if (typeof args.out === "string") {
   paths.networkPath = args.out;
   paths.assumptionsPath = `${args.out.replace(/\.network\.json(\.gz)?$/, "")}.assumptions.json`;
 }
+paths.networkPath = fromRepoRoot(paths.networkPath);
+paths.assumptionsPath = fromRepoRoot(paths.assumptionsPath);
 
 if (!existsSync(snapshotPath)) {
   console.error(

@@ -88,6 +88,44 @@ describe("lane counts", () => {
     expect(linkById(derived, "w1_0_b").provenance.laneIds).toBe("osm");
   });
 
+  it("subtracts a stale lanes:backward from `lanes` on one-way streets", () => {
+    const net = compile(
+      localSnapshot(straight, [
+        twoWay(
+          1,
+          {
+            highway: "secondary",
+            oneway: "yes",
+            lanes: "7",
+            "lanes:backward": "3",
+            "turn:lanes:forward": "left|through|through|right",
+          },
+          [1, 2],
+        ),
+      ]),
+    ).network;
+    const lanes = lanesOf(net, linkById(net, "w1_0_f"));
+    expect(lanes).toHaveLength(4);
+    expect(lanes.map((l) => l.turns)).toEqual([["left"], ["through"], ["through"], ["right"]]);
+  });
+
+  it("splits `lanes` by the turn:lanes:<dir> entry counts when they are consistent", () => {
+    const net = compile(
+      localSnapshot(straight, [
+        twoWay(
+          1,
+          { highway: "tertiary", lanes: "4", "turn:lanes:backward": "left|through;left|right" },
+          [1, 2],
+        ),
+      ]),
+    ).network;
+    expect(lanesOf(net, linkById(net, "w1_0_f"))).toHaveLength(1);
+    const back = lanesOf(net, linkById(net, "w1_0_b"));
+    expect(back.map((l) => l.turns)).toEqual([["left"], ["left", "through"], ["right"]]);
+    expect(back[0]?.kind).toBe("turn_pocket");
+    expect(linkById(net, "w1_0_b").provenance.laneIds).toBe("osm");
+  });
+
   it("falls back to class defaults with provenance default", () => {
     const net = compile(
       localSnapshot(straight, [twoWay(1, { highway: "trunk", name: "Аль-Фараби" }, [1, 2])]),
@@ -113,12 +151,39 @@ describe("lane counts", () => {
     expect(link.provenance.laneIds).toBe("osm");
   });
 
-  it("ignores turn:lanes that contradict the lane count and warns", () => {
+  it("trusts turn:lanes over a contradicting `lanes` on one-way streets", () => {
     const report = compile(
       localSnapshot(straight, [
         twoWay(
           1,
           { highway: "secondary", oneway: "yes", lanes: "2", "turn:lanes": "left|through|right" },
+          [1, 2],
+        ),
+      ]),
+    );
+    const link = linkById(report.network, "w1_0_f");
+    expect(lanesOf(report.network, link).map((l) => l.turns)).toEqual([
+      ["left"],
+      ["through"],
+      ["right"],
+    ]);
+    expect(link.provenance.laneIds).toBe("osm");
+    expect(report.warnings).toContain(
+      "way 1: lanes=2 contradicts turn:lanes with 3 entries on a one-way street; using turn:lanes",
+    );
+  });
+
+  it("ignores turn:lanes that contradict an explicit lane count on two-way streets and warns", () => {
+    const report = compile(
+      localSnapshot(straight, [
+        twoWay(
+          1,
+          {
+            highway: "secondary",
+            "lanes:forward": "2",
+            "lanes:backward": "2",
+            "turn:lanes:forward": "left|through|right",
+          },
           [1, 2],
         ),
       ]),
@@ -281,6 +346,21 @@ describe("bus lanes", () => {
       "general",
       "bus",
     ]);
+  });
+
+  it("accepts busway:left=yes (Almaty tagging) and splits an undirected lanes:psv count", () => {
+    const report = compile(
+      localSnapshot(straight, [
+        twoWay(1, { highway: "tertiary", lanes: "4", "busway:left": "yes" }, [1, 2]),
+        twoWay(2, { highway: "tertiary", lanes: "4", "lanes:psv": "2" }, [2, 1]),
+      ]),
+    );
+    const net = report.network;
+    expect(lanesOf(net, linkById(net, "w1_0_f")).every((l) => l.kind === "general")).toBe(true);
+    expect(lanesOf(net, linkById(net, "w1_0_b")).map((l) => l.kind)).toEqual(["general", "bus"]);
+    expect(lanesOf(net, linkById(net, "w2_0_f")).map((l) => l.kind)).toEqual(["general", "bus"]);
+    expect(lanesOf(net, linkById(net, "w2_0_b")).map((l) => l.kind)).toEqual(["general", "bus"]);
+    expect(report.warnings.filter((w) => w.startsWith("way"))).toEqual([]);
   });
 
   it("reads bus:lanes and moves a misplaced designated lane to the right with a warning", () => {

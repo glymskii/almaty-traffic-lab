@@ -34,6 +34,30 @@ describe("topology: splitting and merging", () => {
     expect(merged.toNodeId).toBe("n3");
   });
 
+  it("merges one-way chains whichever way is upstream", () => {
+    // Way 1 (lower id) starts at the shared node; way 2 ends there.
+    const snap = localSnapshot({ 1: [-300, 0], 2: [0, 0], 3: [300, 0] }, [
+      { id: 1, tags: { highway: "tertiary", oneway: "yes", lanes: "2" }, nodes: [2, 3] },
+      { id: 2, tags: { highway: "tertiary", oneway: "yes", lanes: "2" }, nodes: [1, 2] },
+    ]);
+    const net = compile(snap).network;
+    expect(nodeIds(net)).toEqual(["n1", "n3"]);
+    expect(linkIds(net)).toEqual(["w1_0_f"]);
+    const link = linkById(net, "w1_0_f");
+    expect(link.fromNodeId).toBe("n1");
+    expect(link.toNodeId).toBe("n3");
+    expect(link.osmWayIds).toEqual([1, 2]);
+    // Two one-way ways pointing at each other cannot merge: the node stays a bend.
+    const headOn = compile(
+      localSnapshot({ 1: [-300, 0], 2: [0, 0], 3: [300, 0] }, [
+        { id: 1, tags: { highway: "tertiary", oneway: "yes" }, nodes: [1, 2] },
+        { id: 2, tags: { highway: "tertiary", oneway: "yes" }, nodes: [3, 2] },
+      ]),
+    ).network;
+    expect(nodeById(headOn, "n2").kind).toBe("bend");
+    expect(headOn.links).toHaveLength(2);
+  });
+
   it("does not merge across a lane-count change, a layer change or a bridge", () => {
     const snap = localSnapshot({ 1: [-300, 0], 2: [-100, 0], 3: [100, 0], 4: [300, 0] }, [
       { id: 1, tags: { ...residential("Улица"), lanes: "2" }, nodes: [1, 2] },
@@ -173,15 +197,15 @@ describe("topology: traffic signals", () => {
     3: [0, -300] as [number, number],
     4: [0, 300] as [number, number],
     5: [0, 0] as [number, number],
-    // signal nodes on the southern approach, 8 m and 12 m before the junction
+    // signal nodes on the southern approach, 8 m and 25 m before the junction (Almaty stop lines)
     6: [0, -8] as [number, number],
-    7: [0, -12] as [number, number],
+    7: [0, -25] as [number, number],
     // a mid-block signal 150 m along the northern arm
     8: [0, 150] as [number, number],
   };
   const signal = { highway: "traffic_signals" };
 
-  it("folds signal nodes within 15 m into the junction, keeps distant ones as signalized bends", () => {
+  it("folds signal nodes within 30 m into the junction, keeps distant ones as signalized bends", () => {
     const snap = localSnapshot(
       cross,
       [
