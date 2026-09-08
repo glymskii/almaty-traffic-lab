@@ -25,6 +25,7 @@ import { idmAcceleration, idmFreeAcceleration } from "./models/idm.ts";
 import { mandatoryBias, mobilIncentive, mobilSafe } from "./models/mobil.ts";
 import { Rng } from "./rng.ts";
 import { SimClock } from "./runtime/clock.ts";
+import { IntersectionRuntime } from "./runtime/intersections.ts";
 import { LaneRuntime } from "./runtime/lanes.ts";
 import { CLASS_COUNT, RuntimeNetwork } from "./runtime/network.ts";
 import { SignalRuntime } from "./runtime/signals.ts";
@@ -134,6 +135,10 @@ export interface SimulationKernel {
   readonly signals: SignalRuntime;
   /** Lane-level access rights and turn service (T-10); see `runtime/lanes.ts`. */
   readonly lanes: LaneRuntime;
+  /** Conflict points, gap acceptance and gridlock (T-11); see `runtime/intersections.ts`. */
+  readonly intersections: IntersectionRuntime;
+  /** Per vehicle slot: 1 when the driver refuses to enter a junction whose exit is full (T-11). */
+  readonly gridlockDisciplined: Uint8Array;
   /**
    * Forces the distribution of the next manoeuvre for vehicles entering `linkId`, replacing the
    * uniform draw over the movements the link offers. Shares are relative weights over the movements
@@ -156,6 +161,8 @@ export function kernelOf(sim: Simulation): SimulationKernel {
     entryBlockedYellow: sim.entryBlockedYellow,
     signals: sim.signals,
     lanes: sim.lanes,
+    intersections: sim.intersections,
+    gridlockDisciplined: sim.gridlockDisciplined,
     setTurnShares: (linkId, shares) => {
       sim.setTurnShares(linkId, shares);
     },
@@ -196,9 +203,25 @@ const AUTO_DEMAND_FACTOR = 0.7;
 const RNG_FORK_SPAWN = 0;
 const RNG_FORK_DRIVERS = 1;
 const RNG_FORK_LANES = 2;
+const RNG_FORK_JUNCTIONS = 3;
 
 const CAUSE_LANE_CHANGE_WAIT = causeCode("lane_change_wait");
 const CAUSE_POCKET_SPILLBACK = causeCode("pocket_spillback");
+const CAUSE_GAP_LEFT_TURN = causeCode("gap_left_turn");
+const CAUSE_YIELD_PRIORITY = causeCode("yield_priority");
+const CAUSE_GRIDLOCK = causeCode("gridlock");
+const CAUSE_DOWNSTREAM_SPILLBACK = causeCode("downstream_spillback");
+
+/**
+ * A vehicle giving way stops this far short of a conflict point. Slightly more than the occupancy
+ * zone of `runtime/intersections.ts`, so that waiting inside the junction never makes a point
+ * occupied and never steals right of way from the movement it is waiting for.
+ */
+const CONFLICT_STOP_MARGIN_M = 2.5;
+/** Half-width of the occupancy zone around a conflict point; mirrors `runtime/intersections.ts`. */
+const CONFLICT_ZONE_M = 2;
+/** Speed a driver counts on while clearing a conflict point from the place it waits, m/s. */
+const CONFLICT_CROSSING_MPS = 5;
 
 /** Duration of a lane-change manoeuvre and, with it, the minimum interval between two changes, s. */
 const LANE_CHANGE_DURATION_S = 2;
@@ -228,6 +251,7 @@ class SimulationImpl implements Simulation {
   readonly pool: VehiclePool;
   readonly signals: SignalRuntime;
   readonly lanes: LaneRuntime;
+  readonly intersections: IntersectionRuntime;
 
   private cfg: SimConfig;
   private readonly clock: SimClock;
@@ -235,6 +259,8 @@ class SimulationImpl implements Simulation {
   private readonly driverRng: Rng;
   /** Turn intent at link entry and the bus-lane violator draw (T-10). */
   private readonly laneRng: Rng;
+  /** Gridlock-discipline draw at spawn (T-11). */
+  private readonly junctionRng: Rng;
   private readonly hash = new TrajectoryHash();
 
   // ---- lane changes (T-10) ----
@@ -244,6 +270,10 @@ class SimulationImpl implements Simulation {
   private readonly pendingLeader: Int32Array;
   /** 1 while a mandatory lane change is pending but was not feasible this step. */
   private readonly laneChangeBlocked: Uint8Array;
+  /** See SimulationKernel.gridlockDisciplined; drawn once per vehicle at spawn (T-11). */
+  readonly gridlockDisciplined: Uint8Array;
+  /** Reason the first blocking conflict point of `conflictStopDistance` is closed; scratch, not state. */
+  private conflictCause = 0;
   /** [link * TURN_COUNT + turn] -> relative weight of the movement, see setTurnShares. */
   private readonly turnShares: Float64Array;
   /** 1 for links with explicit shares; the rest draw uniformly over the movements they offer. */
@@ -297,14 +327,17 @@ class SimulationImpl implements Simulation {
       this.runtime,
       opts.config.behavior.taxisAllowedInBusLanes,
     );
+    this.intersections = new IntersectionRuntime(opts.network, this.runtime);
     this.clock = new SimClock(opts.config.dtS, opts.config.startTimeMin);
     const master = new Rng(opts.config.seed);
     this.spawnRng = master.fork(RNG_FORK_SPAWN);
     this.driverRng = master.fork(RNG_FORK_DRIVERS);
     this.laneRng = master.fork(RNG_FORK_LANES);
+    this.junctionRng = master.fork(RNG_FORK_JUNCTIONS);
     this.pendingLane = new Int32Array(opts.config.demand.vehicleBudget).fill(-1);
     this.pendingLeader = new Int32Array(opts.config.demand.vehicleBudget).fill(-1);
     this.laneChangeBlocked = new Uint8Array(opts.config.demand.vehicleBudget);
+    this.gridlockDisciplined = new Uint8Array(opts.config.demand.vehicleBudget);
     this.turnShares = new Float64Array(this.runtime.linkCount * TURN_COUNT);
     this.turnSharesSet = new Uint8Array(this.runtime.linkCount);
 
@@ -321,6 +354,16 @@ class SimulationImpl implements Simulation {
     this.entryBlockedYellow = new Uint8Array(this.runtime.trackCount);
     // Signals at t=0, so writeFrame()/kernelOf() are correct even before the first step().
     this.updateSignals(0);
+    // A movement at a signalized node with no signal group is prohibited, not unsignalized (T-08):
+    // no phase ever releases it, and `updateSignals` skips it, so the block is set once and stays.
+    for (let t = this.runtime.laneCount; t < this.runtime.trackCount; t++) {
+      if (this.intersections.connProhibited[t] === 1) this.entryBlockedCause[t] = CAUSE_SIGNAL_RED;
+    }
+    this.intersections.update(
+      this.pool,
+      this.signals.groupState,
+      opts.config.metrics.stoppedSpeedMps,
+    );
 
     const gateCount = this.runtime.gateCount;
     this.gateBudget = new Float64Array(gateCount);
@@ -356,6 +399,7 @@ class SimulationImpl implements Simulation {
     // 2-3 (pedestrians, routing): later tasks.
     this.selectLanes(); // 4
     this.changeLanes(now); // 5
+    this.intersections.update(this.pool, this.signals.groupState, this.cfg.metrics.stoppedSpeedMps);
     this.computeAccelerations(); // 6
     this.integrate(dt, now); // 7
     this.repairOrder();
@@ -878,6 +922,35 @@ class SimulationImpl implements Simulation {
         }
       }
 
+      // Obstacle: a conflict point inside the junction the movement may not cross yet (T-11).
+      // The vehicle is placed on the connector's own coordinate: negative while it still approaches
+      // the stop line, so one walk over the connector's conflict points covers both cases.
+      const conn = t >= rt.laneCount ? t : next;
+      if (conn >= rt.laneCount) {
+        const sHere = t === conn ? si : si - (trackEnd[t] as number);
+        const dist = this.conflictStopDistance(i, conn, sHere);
+        if (dist < Number.POSITIVE_INFINITY) {
+          const aStop = this.accelTowardObstacle(i, vi, v0, dist, 0);
+          if (aStop < acc) {
+            acc = aStop;
+            if (aFree - aStop >= LEADER_BINDING_MPS2) c = this.conflictCause;
+          }
+        }
+      }
+
+      // Obstacle: the exit of the movement has no room left and the driver is disciplined enough
+      // not to block the junction (N19). An undisciplined one enters and may lock it instead.
+      if (t < rt.laneCount && next >= rt.laneCount && this.gridlockDisciplined[i] === 1) {
+        const room = this.intersections.exitFreeM[next] as number;
+        if (room < (len[i] as number) + (pool.minGap[i] as number)) {
+          const aStop = this.accelTowardObstacle(i, vi, v0, (trackEnd[t] as number) - si, 0);
+          if (aStop < acc) {
+            acc = aStop;
+            if (aFree - aStop >= LEADER_BINDING_MPS2) c = CAUSE_DOWNSTREAM_SPILLBACK;
+          }
+        }
+      }
+
       // A vehicle that has to brake for a mandatory change it could not make blames the change,
       // not the vehicle in front of it (the leader is only the messenger).
       if (
@@ -891,6 +964,67 @@ class SimulationImpl implements Simulation {
       a[i] = acc;
       cause[i] = c;
     }
+  }
+
+  /**
+   * Distance from `sHere` (the vehicle's position in the coordinate of connector `conn`, negative
+   * while it is still on the approach lane) to the first conflict point of that movement it may not
+   * cross, or +Infinity when the whole movement is clear. The reason lands in `conflictCause`.
+   *
+   * A point is closed when a car is stuck on it and cannot leave the junction -- that binds every
+   * movement, protected ones included, and is what `gridlock` means -- or when this movement gives
+   * way there and a vehicle of the priority movement stands on the point or arrives within the
+   * driver's critical gap.
+   */
+  private conflictStopDistance(i: number, conn: number, sHere: number): number {
+    const ir = this.intersections;
+    const cf = ir.conflicts;
+    const start = cf.conflictStart[conn] as number;
+    const count = cf.conflictCount[conn] as number;
+    if (count === 0) return Number.POSITIVE_INFINITY;
+    const pool = this.pool;
+    const yieldCause =
+      (this.runtime.connTurn[conn] as number) === TurnCode.left
+        ? CAUSE_GAP_LEFT_TURN
+        : CAUSE_YIELD_PRIORITY;
+    const lengthI = pool.length[i] as number;
+    // Accepted gap = the driver's critical gap plus the time it needs to clear the point from the
+    // place it waits: a gap that is only just long enough to start is not long enough to finish.
+    const criticalGapS =
+      ((this.runtime.connTurn[conn] as number) === TurnCode.left
+        ? (pool.gapLeftTurn[i] as number)
+        : (pool.gapMerge[i] as number)) +
+      (CONFLICT_STOP_MARGIN_M + CONFLICT_ZONE_M + lengthI) / CONFLICT_CROSSING_MPS;
+    for (let k = start; k < start + count; k++) {
+      const sPoint = cf.conflictSThis[k] as number;
+      if (sPoint <= sHere) continue; // already crossed
+      const blocked = ir.pointJammed[k] === 1;
+      const yielding =
+        !blocked &&
+        ir.mustYield[k] === 1 &&
+        (ir.pointOccupied[k] === 1 || (ir.threatTimeS[k] as number) < criticalGapS);
+      if (!blocked && !yielding) continue;
+      // Wait clear of every point, not just of this one: a body left standing across a crossing it
+      // has already passed would block that movement and hand the waiting driver right of way.
+      let stopAt = sPoint - CONFLICT_STOP_MARGIN_M;
+      for (let m = k - 1; m >= start; m--) {
+        const earlier = cf.conflictSThis[m] as number;
+        if (earlier < stopAt - lengthI - CONFLICT_STOP_MARGIN_M) break;
+        stopAt = earlier - CONFLICT_STOP_MARGIN_M;
+      }
+      if (stopAt > sHere) {
+        this.conflictCause = blocked ? CAUSE_GRIDLOCK : yieldCause;
+        return stopAt - sHere;
+      }
+      // Past the last safe place to wait. A vehicle already committed into the junction keeps going
+      // unless the point itself is taken, in which case stopping short is still better than driving
+      // into the occupant.
+      if (ir.pointOccupied[k] === 1 || blocked) {
+        this.conflictCause = blocked ? CAUSE_GRIDLOCK : yieldCause;
+        return 0;
+      }
+    }
+    return Number.POSITIVE_INFINITY;
   }
 
   /** IDM acceleration of vehicle `i` (speed `v`, desired `v0`) towards an obstacle `gap` metres ahead. */
@@ -1175,6 +1309,10 @@ class SimulationImpl implements Simulation {
     pool.laneChangeFromOffsetM[i] = rt.trackOffsetM[lane] as number;
     this.pendingLane[i] = -1;
     this.laneChangeBlocked[i] = 0;
+    // Gridlock discipline is a property of the driver, drawn once (behavior.gridlockDiscipline).
+    this.gridlockDisciplined[i] = this.junctionRng.chance(this.cfg.behavior.gridlockDiscipline)
+      ? 1
+      : 0;
     this.enterLink(i, lane);
     pool.flags[i] = vEntry <= this.cfg.metrics.stoppedSpeedMps ? VehicleFlag.STOPPED : 0;
     pool.cause[i] = CAUSE_FREE_FLOW;

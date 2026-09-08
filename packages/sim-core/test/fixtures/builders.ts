@@ -21,6 +21,7 @@ import {
   leftOf,
   normalize,
   polylineLen,
+  rightOf,
   scale,
   sub,
   type Vec2,
@@ -336,13 +337,27 @@ function buildApproachArm(spec: {
   highwayClass?: string;
   /** "junction" repurposes the far node as an unsignalized junction instead of a gate (corridor). */
   farNodeKind?: "gate" | "junction";
+  /**
+   * Half-width of the junction box: the stop line sits this far from the node centre, so connectors
+   * actually cross the intersection instead of degenerating into stubs at a single point (T-11).
+   * `armLengthM` stays the gate-to-stop-line distance, so the gate simply moves further out.
+   */
+  junctionRadiusM?: number;
+  /**
+   * Splits the exit into a stub of this length plus a tail, with an all-but-permanently red signal
+   * between them, so that the exit fills up and the queue spills back into the junction (N19).
+   */
+  blockedExitM?: number;
 }) {
   const { centerId, center, dir, armLengthM, lanes, pocketM, busLane, idPrefix, registry } = spec;
   const speedLimitKph = spec.speedLimitKph ?? 50;
   const highwayClass = spec.highwayClass ?? "secondary";
   const farNodeKind = spec.farNodeKind ?? "gate";
+  const junctionRadiusM = spec.junctionRadiusM ?? 0;
+  const blockedExitM = spec.blockedExitM ?? 0;
 
-  const gatePos = add(center, scale(DIR_VEC[dir], armLengthM));
+  const stopPos = add(center, scale(DIR_VEC[dir], junctionRadiusM));
+  const gatePos = add(center, scale(DIR_VEC[dir], armLengthM + junctionRadiusM));
   const gateId = `${idPrefix}.gate`;
   const inLinkId = `${idPrefix}.in`;
   const outLinkId = `${idPrefix}.out`;
@@ -413,45 +428,79 @@ function buildApproachArm(spec: {
   // so `turns` is unused here -- except corridor's parallelStreet, which reverses an arm's exit
   // lanes into the residential T-junction's approach lanes. Give them the same "no pocket" turns
   // a plain approach lane would have so that reversal stays valid without special-casing it.
-  const exitGeneralLaneIds: string[] = [];
-  const outLaneDefs = [];
-  const outLaneIds: string[] = [];
-  for (let i = 0; i < lanes; i++) {
-    const id = `${outLinkId}:${i}`;
-    outLaneDefs.push({
-      id,
-      linkId: outLinkId,
-      index: i,
-      startS: 0,
-      endS: armLengthM,
-      kind: "general",
-      allowed: ALL,
-      turns: simpleLaneTurns(i, lanes),
-    });
-    outLaneIds.push(id);
-    exitGeneralLaneIds.push(id);
-  }
-  let exitBusLaneId: string | undefined;
-  if (busLane) {
-    exitBusLaneId = `${outLinkId}:${lanes}`;
-    outLaneDefs.push({
-      id: exitBusLaneId,
-      linkId: outLinkId,
-      index: lanes,
-      startS: 0,
-      endS: armLengthM,
-      kind: "bus",
-      allowed: PT,
-      turns: ["through"],
-      busLane: { allowed: PT },
-    });
-    outLaneIds.push(exitBusLaneId);
-  }
+  // `blockedExitM` splits the exit into a short stub plus a tail, with an all-but-permanently red
+  // signal in between: the stub fills up and the queue spills back into the junction box (N19).
+  const outStubM = blockedExitM > 0 ? Math.min(blockedExitM, armLengthM / 2) : armLengthM;
+  const tailLinkId = `${idPrefix}.tail`;
+  const exitLanesOf = (linkId: string, lengthM: number) => {
+    const defs = [];
+    const ids: string[] = [];
+    const generalIds: string[] = [];
+    for (let i = 0; i < lanes; i++) {
+      const id = `${linkId}:${i}`;
+      defs.push({
+        id,
+        linkId,
+        index: i,
+        startS: 0,
+        endS: lengthM,
+        kind: "general",
+        allowed: ALL,
+        turns: simpleLaneTurns(i, lanes),
+      });
+      ids.push(id);
+      generalIds.push(id);
+    }
+    let busId: string | undefined;
+    if (busLane) {
+      busId = `${linkId}:${lanes}`;
+      defs.push({
+        id: busId,
+        linkId,
+        index: lanes,
+        startS: 0,
+        endS: lengthM,
+        kind: "bus",
+        allowed: PT,
+        turns: ["through"],
+        busLane: { allowed: PT },
+      });
+      ids.push(busId);
+    }
+    return { defs, ids, generalIds, busId };
+  };
+  const out = exitLanesOf(outLinkId, outStubM);
+  const outLaneDefs = out.defs;
+  const outLaneIds = out.ids;
+  const exitGeneralLaneIds = out.generalIds;
+  const exitBusLaneId = out.busId;
+  const tail = blockedExitM > 0 ? exitLanesOf(tailLinkId, armLengthM - outStubM) : undefined;
 
-  registry.geom.set(inLinkId, [gatePos, center]);
+  // With a junction box the two carriageways are also pulled apart: each keeps to the right of the
+  // arm axis by half its own width. Without this the opposing directions would sit on exactly the
+  // same lane centrelines and no left turn would ever cross an opposing through movement.
+  const inShift =
+    junctionRadiusM > 0
+      ? scale(rightOf(inDirVec), (inLaneIds.length * LANE_WIDTH_M) / 2)
+      : ([0, 0] as Vec2);
+  const outShift =
+    junctionRadiusM > 0
+      ? scale(rightOf(outDirVec), (outLaneIds.length * LANE_WIDTH_M) / 2)
+      : ([0, 0] as Vec2);
+  const inGeometry: Vec2[] = [add(gatePos, inShift), add(stopPos, inShift)];
+  const blockPos = add(center, scale(DIR_VEC[dir], junctionRadiusM + outStubM));
+  const outEnd = tail ? add(blockPos, outShift) : add(gatePos, outShift);
+  const outGeometry: Vec2[] = [add(stopPos, outShift), outEnd];
+  const tailGeometry: Vec2[] = [outEnd, add(gatePos, outShift)];
+
+  registry.geom.set(inLinkId, inGeometry);
   registry.order.set(inLinkId, inLaneIds);
-  registry.geom.set(outLinkId, [center, gatePos]);
+  registry.geom.set(outLinkId, outGeometry);
   registry.order.set(outLinkId, outLaneIds);
+  if (tail) {
+    registry.geom.set(tailLinkId, tailGeometry);
+    registry.order.set(tailLinkId, tail.ids);
+  }
 
   const info: ArmInfo = {
     dir,
@@ -474,38 +523,106 @@ function buildApproachArm(spec: {
     pedGroupId: undefined,
   };
 
+  const blockNodeId = `${idPrefix}.block`;
+  const nodes: unknown[] = [{ id: gateId, x: gatePos[0], y: gatePos[1], kind: farNodeKind }];
+  const armLinks: unknown[] = [
+    {
+      id: inLinkId,
+      fromNodeId: gateId,
+      toNodeId: centerId,
+      highwayClass,
+      geometry: inGeometry,
+      lengthM: armLengthM,
+      speedLimitKph,
+      laneIds: inLaneIds,
+    },
+    {
+      id: outLinkId,
+      fromNodeId: centerId,
+      toNodeId: tail ? blockNodeId : gateId,
+      highwayClass,
+      geometry: outGeometry,
+      lengthM: outStubM,
+      speedLimitKph,
+      laneIds: outLaneIds,
+    },
+  ];
+  const armLanes: unknown[] = [...inLaneDefs, ...outLaneDefs];
+  const armConnectors: RawConnector[] = [];
+  const armControllers: unknown[] = [];
+  if (tail) {
+    nodes.push({ id: blockNodeId, x: blockPos[0], y: blockPos[1], kind: "signalized" });
+    armLinks.push({
+      id: tailLinkId,
+      fromNodeId: blockNodeId,
+      toNodeId: gateId,
+      highwayClass,
+      geometry: tailGeometry,
+      lengthM: armLengthM - outStubM,
+      speedLimitKph,
+      laneIds: tail.ids,
+    });
+    armLanes.push(...tail.defs);
+    const groupId = `sg.${idPrefix}.block`;
+    for (let i = 0; i < outLaneIds.length; i++) {
+      const fromLaneId = outLaneIds[i] as string;
+      const toLaneId = tail.ids[i] as string;
+      const c = makeConnector(
+        registry,
+        fromLaneId,
+        outLinkId,
+        outDirVec,
+        toLaneId,
+        tailLinkId,
+        outDirVec,
+        blockNodeId,
+        "through",
+        "protected",
+      );
+      c.signalGroupId = groupId;
+      armConnectors.push(c);
+    }
+    armControllers.push(
+      signalController({
+        id: `ctrl.${idPrefix}.block`,
+        nodeId: blockNodeId,
+        groups: [
+          signalGroup({
+            id: groupId,
+            kind: "vehicle",
+            section: "main",
+            approachLinkId: outLinkId,
+            connectorIds: armConnectors.map((c) => c.id),
+          }),
+        ],
+        // One green second per ten minutes: red for every practical purpose, but still a legal plan
+        // (checkNetworkIntegrity rejects a group that is never green).
+        phases: [
+          signalPhase({
+            id: `ph.${idPrefix}.block`,
+            greenGroupIds: [groupId],
+            greenS: 1,
+            yellowS: 0,
+            allRedS: 600,
+          }),
+        ],
+      }),
+    );
+  }
+
   return {
-    nodes: [{ id: gateId, x: gatePos[0], y: gatePos[1], kind: farNodeKind }],
-    links: [
-      {
-        id: inLinkId,
-        fromNodeId: gateId,
-        toNodeId: centerId,
-        highwayClass,
-        geometry: [gatePos, center],
-        lengthM: armLengthM,
-        speedLimitKph,
-        laneIds: inLaneIds,
-      },
-      {
-        id: outLinkId,
-        fromNodeId: centerId,
-        toNodeId: gateId,
-        highwayClass,
-        geometry: [center, gatePos],
-        lengthM: armLengthM,
-        speedLimitKph,
-        laneIds: outLaneIds,
-      },
-    ],
-    lanes: [...inLaneDefs, ...outLaneDefs],
+    nodes,
+    links: armLinks,
+    lanes: armLanes,
+    connectors: armConnectors,
+    controllers: armControllers,
     gate:
       farNodeKind === "gate"
         ? {
             id: `${idPrefix}.g`,
             nodeId: gateId,
             inLinkIds: [inLinkId],
-            outLinkIds: [outLinkId],
+            outLinkIds: [tail ? tailLinkId : outLinkId],
             weightIn: 1,
             weightOut: 1,
           }
@@ -781,6 +898,11 @@ export interface CrossroadsOptions {
   /** Fixed-time plan. When omitted the builder emits a simple 2-phase plan (NS / EW) plus arrows if protected. */
   cycleS?: number;
   greenSplitNS?: number;
+  /**
+   * Chokes the exit of one arm: its outbound link becomes a stub of `blockedExitM` metres ending at
+   * an all-but-permanently red signal, so the queue spills back into the junction box (N19).
+   */
+  blockedExit?: { dir: "N" | "E" | "S" | "W"; lengthM?: number };
 }
 
 /** Four-arm signalized intersection with gates at each arm end. The workhorse fixture. T-03. */
@@ -793,6 +915,7 @@ export function crossroads(opts: CrossroadsOptions = {}): Network {
   const crosswalksOn = opts.crosswalks ?? false;
   const cycleS = opts.cycleS ?? 90;
   const greenSplitNS = opts.greenSplitNS ?? 0.5;
+  const blockedExit = opts.blockedExit;
 
   const centerId = "center";
   const center: Vec2 = [0, 0];
@@ -802,7 +925,14 @@ export function crossroads(opts: CrossroadsOptions = {}): Network {
   const links: unknown[] = [];
   const lanes: unknown[] = [];
   const gates: unknown[] = [];
+  const exitConnectors: RawConnector[] = [];
+  const exitControllers: unknown[] = [];
   const arms: Partial<Record<Dir, ArmInfo>> = {};
+
+  // Half-width of the junction box: the crossing street is `lanesN` lanes per direction plus a
+  // pocket or bus lane, so the stop lines sit this far from the centre and the connectors really
+  // cross each other inside the box (see buildApproachArm.junctionRadiusM).
+  const junctionRadiusM = (lanesN + 1) * LANE_WIDTH_M;
 
   for (const dir of DIRS) {
     const isEW = dir === "E" || dir === "W";
@@ -816,11 +946,15 @@ export function crossroads(opts: CrossroadsOptions = {}): Network {
       busLane: busLaneEW && isEW,
       idPrefix: dir,
       registry,
+      junctionRadiusM,
+      blockedExitM: blockedExit?.dir === dir ? (blockedExit.lengthM ?? 60) : 0,
     });
     nodes.push(...arm.nodes);
     links.push(...arm.links);
     lanes.push(...arm.lanes);
     if (arm.gate) gates.push(arm.gate);
+    exitControllers.push(...arm.controllers);
+    exitConnectors.push(...arm.connectors);
     arms[dir] = arm.info;
   }
 
@@ -985,9 +1119,9 @@ export function crossroads(opts: CrossroadsOptions = {}): Network {
     nodes,
     links,
     lanes,
-    connectors,
+    connectors: [...connectors, ...exitConnectors],
     crosswalks,
-    signalControllers: [controller],
+    signalControllers: [controller, ...exitControllers],
     gates,
   });
 }
@@ -1032,6 +1166,7 @@ export function tJunction(opts: TJunctionOptions = {}): Network {
       busLane: false,
       idPrefix: dir,
       registry,
+      junctionRadiusM: (lanesN + 1) * LANE_WIDTH_M,
     });
     nodes.push(...arm.nodes);
     links.push(...arm.links);

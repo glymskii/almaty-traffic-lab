@@ -124,9 +124,12 @@ describe("crossroads without left pockets", () => {
 
   it("downgrades exactly the movements that share a green with a conflicting one", () => {
     const at = connectorsAt(net, "center");
+    // The rule is symmetric (see protectedConnectorIds): a permissive left and the opposing through
+    // it crosses are green together, so both lose their protection. Only the right turns, which
+    // cross nothing that is green at the same time, stay protected.
     const permissive = at.filter((c) => c.protection === "permissive");
-    expect(permissive.every((c) => c.turn === "left" || c.turn === "right")).toBe(true);
-    expect(at.filter((c) => c.turn === "through").every((c) => c.protection === "protected")).toBe(
+    expect(permissive.every((c) => c.turn === "left" || c.turn === "through")).toBe(true);
+    expect(at.filter((c) => c.turn === "right").every((c) => c.protection === "protected")).toBe(
       true,
     );
     expect(protectedConflictsInPhases(net, ctrl)).toEqual([]);
