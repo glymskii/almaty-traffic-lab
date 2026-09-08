@@ -5,7 +5,8 @@
   "type": "module",
   "description": "OSM import (tiled Overpass snapshot) and compiler OSM -> network.json with assumption generator and provenance.",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./overrides": "./src/compiler/overrides.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",

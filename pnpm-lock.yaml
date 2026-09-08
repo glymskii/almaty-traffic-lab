@@ -26,6 +26,9 @@ importers:
       '@atl/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@atl/map-data':
+        specifier: workspace:*
+        version: link:../../packages/map-data
       '@atl/sim-worker':
         specifier: workspace:*
         version: link:../../packages/sim-worker

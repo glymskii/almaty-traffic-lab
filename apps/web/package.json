@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@atl/contracts": "workspace:*",
+    "@atl/map-data": "workspace:*",
     "@atl/sim-worker": "workspace:*",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
