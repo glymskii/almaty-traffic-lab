@@ -71,6 +71,15 @@ const BLINKER_HEIGHT_ABOVE_GROUND_M = 0.6;
 const BLINKER_SIZE_M = 0.22;
 const BLINKER_HZ = 2;
 
+/** Headlights (docs/tasks/T-27 §3): always positioned while a vehicle is active, glow controlled
+ * globally by `setHeadlightIntensity` (driven by time-of-day.ts, not a per-vehicle flag - the
+ * protocol's `flags` byte has no free bit left, see docs/tasks/T-27's notes on T-13/T-10). */
+const HEADLIGHT_HEIGHT_ABOVE_GROUND_M = 0.5;
+const HEADLIGHT_SIZE_M = 0.16;
+const HEADLIGHT_WIDTH_FACTOR = 0.7;
+const HEADLIGHT_COLOR = "#d8d3bd";
+const HEADLIGHT_EMISSIVE_COLOR = "#fff2c2";
+
 /** `carColorFor`/`isCarLike` are exported for direct unit tests of the palette rule. */
 export function carColorFor(cls: number, id: number): THREE.Color {
   return cls === TAXI_CODE ? TAXI_COLOR : (CAR_PALETTE[id % CAR_PALETTE.length] as THREE.Color);
@@ -82,8 +91,16 @@ export function isCarLike(cls: number): boolean {
 
 const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1);
 
-function makeInstancedMesh(capacity: number, color: string | THREE.Color): THREE.InstancedMesh {
+function makeInstancedMesh(
+  capacity: number,
+  color: string | THREE.Color,
+  emissive?: string | THREE.Color,
+): THREE.InstancedMesh {
   const material = new THREE.MeshLambertMaterial({ color });
+  if (emissive !== undefined) {
+    material.emissive = new THREE.Color(emissive);
+    material.emissiveIntensity = 0; // day default - setHeadlightIntensity ramps this up after dark
+  }
   const mesh = new THREE.InstancedMesh(UNIT_BOX, material, capacity);
   mesh.count = capacity;
   for (let i = 0; i < capacity; i++) mesh.setMatrixAt(i, ZERO_SCALE_MATRIX);
@@ -94,6 +111,8 @@ export interface VehicleInstances {
   readonly object: THREE.Group;
   /** Draws every vehicle in `sample` (interpolation.ts's `sampleInterpolated` output) and hides everything else. */
   update(sample: RenderFrame): void;
+  /** Headlight emissive strength, 0 (day, off) .. 1 (night, full glow) - see time-of-day.ts's `headlight`. */
+  setHeadlightIntensity(intensity: number): void;
 }
 
 export function createVehicleInstances(capacity: number): VehicleInstances {
@@ -105,6 +124,7 @@ export function createVehicleInstances(capacity: number): VehicleInstances {
   const poleMesh = makeInstancedMesh(capacity * 2, POLE_COLOR);
   const brakeMesh = makeInstancedMesh(capacity, BRAKE_LIGHT_COLOR);
   const blinkerMesh = makeInstancedMesh(capacity * 2, BLINKER_COLOR);
+  const headlightMesh = makeInstancedMesh(capacity * 2, HEADLIGHT_COLOR, HEADLIGHT_EMISSIVE_COLOR);
   bodyMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3), 3);
   busMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3), 3);
   bodyMesh.name = "body";
@@ -113,10 +133,11 @@ export function createVehicleInstances(capacity: number): VehicleInstances {
   poleMesh.name = "poles";
   brakeMesh.name = "brake";
   blinkerMesh.name = "blinkers";
+  headlightMesh.name = "headlights";
 
   const group = new THREE.Group();
   group.name = "vehicles";
-  group.add(bodyMesh, cabinMesh, busMesh, poleMesh, brakeMesh, blinkerMesh);
+  group.add(bodyMesh, cabinMesh, busMesh, poleMesh, brakeMesh, blinkerMesh, headlightMesh);
 
   // Persistent per-slot bookkeeping, reused across calls to avoid per-frame allocation.
   const lastCls = new Uint8Array(capacity).fill(NO_CLASS);
@@ -138,6 +159,8 @@ export function createVehicleInstances(capacity: number): VehicleInstances {
     brakeMesh.setMatrixAt(slot, ZERO_SCALE_MATRIX);
     blinkerMesh.setMatrixAt(slot * 2, ZERO_SCALE_MATRIX);
     blinkerMesh.setMatrixAt(slot * 2 + 1, ZERO_SCALE_MATRIX);
+    headlightMesh.setMatrixAt(slot * 2, ZERO_SCALE_MATRIX);
+    headlightMesh.setMatrixAt(slot * 2 + 1, ZERO_SCALE_MATRIX);
     lastCls[slot] = NO_CLASS;
   }
 
@@ -283,6 +306,37 @@ export function createVehicleInstances(capacity: number): VehicleInstances {
     } else {
       blinkerMesh.setMatrixAt(slot * 2 + 1, ZERO_SCALE_MATRIX);
     }
+
+    // Headlights: always present at the front while the vehicle is active - dark/light is a
+    // material-level emissive strength (setHeadlightIntensity), not a per-instance flag.
+    const headlightSize = {
+      lengthM: HEADLIGHT_SIZE_M,
+      heightM: HEADLIGHT_SIZE_M,
+      widthM: HEADLIGHT_SIZE_M,
+    };
+    const headlightRightM = (dims.widthM / 2) * HEADLIGHT_WIDTH_FACTOR;
+    composeBoxMatrix(
+      scratchMatrix,
+      x,
+      y,
+      heading,
+      {
+        forwardM: dims.lengthM / 2,
+        upM: HEADLIGHT_HEIGHT_ABOVE_GROUND_M,
+        rightM: -headlightRightM,
+      },
+      headlightSize,
+    );
+    headlightMesh.setMatrixAt(slot * 2, scratchMatrix);
+    composeBoxMatrix(
+      scratchMatrix,
+      x,
+      y,
+      heading,
+      { forwardM: dims.lengthM / 2, upM: HEADLIGHT_HEIGHT_ABOVE_GROUND_M, rightM: headlightRightM },
+      headlightSize,
+    );
+    headlightMesh.setMatrixAt(slot * 2 + 1, scratchMatrix);
   }
 
   function update(sample: RenderFrame): void {
@@ -313,12 +367,24 @@ export function createVehicleInstances(capacity: number): VehicleInstances {
     for (let k = 0; k < sample.count; k++) wasActive[sample.slot[k] as number] = 0;
     prevCount = sample.count;
 
-    for (const mesh of [bodyMesh, cabinMesh, busMesh, poleMesh, brakeMesh, blinkerMesh]) {
+    for (const mesh of [
+      bodyMesh,
+      cabinMesh,
+      busMesh,
+      poleMesh,
+      brakeMesh,
+      blinkerMesh,
+      headlightMesh,
+    ]) {
       mesh.instanceMatrix.needsUpdate = true;
     }
     if (bodyMesh.instanceColor) bodyMesh.instanceColor.needsUpdate = true;
     if (busMesh.instanceColor) busMesh.instanceColor.needsUpdate = true;
   }
 
-  return { object: group, update };
+  function setHeadlightIntensity(intensity: number): void {
+    (headlightMesh.material as THREE.MeshLambertMaterial).emissiveIntensity = intensity;
+  }
+
+  return { object: group, update, setHeadlightIntensity };
 }

@@ -157,6 +157,42 @@ describe("createVehicleInstances / update", () => {
     expect(instanceScale(findMesh(vehicles.object, "body"), slot)).toBe(0);
   });
 
+  it("positions both headlight instances for an active vehicle regardless of flags (docs/tasks/T-27 §3)", () => {
+    const vehicles = createVehicleInstances(16);
+    const frame = oneVehicleFrame(16); // flags = 0: no braking, no blinkers
+    vehicles.update(frame);
+
+    const slot = frame.slot[0] as number;
+    const headlights = findMesh(vehicles.object, "headlights");
+    expect(instanceScale(headlights, slot * 2)).toBeGreaterThan(0);
+    expect(instanceScale(headlights, slot * 2 + 1)).toBeGreaterThan(0);
+  });
+
+  it("hides both headlight instances once the vehicle stops appearing in the sampled frames", () => {
+    const vehicles = createVehicleInstances(16);
+    const frame = oneVehicleFrame(16);
+    vehicles.update(frame);
+    const slot = frame.slot[0] as number;
+
+    const empty = createRenderFrame(16);
+    empty.count = 0;
+    vehicles.update(empty);
+    const headlights = findMesh(vehicles.object, "headlights");
+    expect(instanceScale(headlights, slot * 2)).toBe(0);
+    expect(instanceScale(headlights, slot * 2 + 1)).toBe(0);
+  });
+
+  it("setHeadlightIntensity drives the headlight material's emissive strength (0 by day, up to 1 by night)", () => {
+    const vehicles = createVehicleInstances(16);
+    const headlights = findMesh(vehicles.object, "headlights");
+    const material = headlights.material as THREE.MeshLambertMaterial;
+    expect(material.emissiveIntensity).toBe(0);
+    vehicles.setHeadlightIntensity(1);
+    expect(material.emissiveIntensity).toBe(1);
+    vehicles.setHeadlightIntensity(0.6);
+    expect(material.emissiveIntensity).toBe(0.6);
+  });
+
   it("clears the previous occupant's parts when a slot is immediately reused by a different vehicle class (no gap frame)", () => {
     const vehicles = createVehicleInstances(16);
     const busFrame = createRenderFrame(16);

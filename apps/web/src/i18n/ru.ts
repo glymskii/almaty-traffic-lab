@@ -32,6 +32,11 @@ export const ru = {
   cameraOverview: "Обзор сети",
   cameraCloseUp: "Приблизить к трафику",
 
+  // City layer switches (docs/tasks/T-27 п.2).
+  layersTitle: "Слои",
+  layerBuildings: "Здания",
+  layerGreenery: "Зелень/вода",
+
   // Global params panel (docs/tasks/T-23 п.3).
   paramsTitle: "Глобальные параметры",
   paramDemandMultiplier: "Множитель спроса",

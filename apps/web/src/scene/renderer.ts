@@ -1,10 +1,14 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import type { TimeOfDaySample } from "./time-of-day.ts";
 
 /**
  * The Three.js "engine": renderer, camera, base lighting and ground, resize handling and the
  * requestAnimationFrame loop. Knows nothing about the network - roads/markings/labels are added
  * to `scene` by their own modules. Low-poly, no shadows, no post-processing (docs/DECISIONS.md D13).
+ * Sky/light colours below are the "day" entry of time-of-day.ts's palette (`applyTimeOfDay`
+ * overwrites them every frame once a sim time is known - docs/tasks/T-27 §3); they only show as
+ * the very first paint, before that.
  */
 
 const HEMI_SKY_COLOR = "#bcd6e8";
@@ -21,6 +25,11 @@ export interface Engine {
   readonly scene: THREE.Scene;
   readonly camera: THREE.PerspectiveCamera;
   readonly controls: OrbitControls;
+  /** Mutated by `applyTimeOfDay`; the same instance is always `scene.background`. */
+  readonly skyColor: THREE.Color;
+  readonly hemiLight: THREE.HemisphereLight;
+  readonly sunLight: THREE.DirectionalLight;
+  readonly groundMaterial: THREE.MeshLambertMaterial;
   /** Register a per-frame callback; returns a function that unregisters it. */
   onFrame(callback: (dtS: number) => void): () => void;
   dispose(): void;
@@ -28,7 +37,8 @@ export interface Engine {
 
 export function createEngine(container: HTMLElement): Engine {
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(BACKGROUND_COLOR);
+  const skyColor = new THREE.Color(BACKGROUND_COLOR);
+  scene.background = skyColor;
 
   const camera = new THREE.PerspectiveCamera(
     55,
@@ -47,15 +57,17 @@ export function createEngine(container: HTMLElement): Engine {
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
 
-  scene.add(new THREE.HemisphereLight(HEMI_SKY_COLOR, HEMI_GROUND_COLOR, 1.0));
-  const sun = new THREE.DirectionalLight(SUN_COLOR, 1.3);
-  sun.position.set(120, 200, 80);
-  sun.castShadow = false;
-  scene.add(sun);
+  const hemiLight = new THREE.HemisphereLight(HEMI_SKY_COLOR, HEMI_GROUND_COLOR, 1.0);
+  scene.add(hemiLight);
+  const sunLight = new THREE.DirectionalLight(SUN_COLOR, 1.3);
+  sunLight.position.set(120, 200, 80);
+  sunLight.castShadow = false;
+  scene.add(sunLight);
 
+  const groundMaterial = new THREE.MeshLambertMaterial({ color: GROUND_COLOR });
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(GROUND_SIZE_M, GROUND_SIZE_M),
-    new THREE.MeshLambertMaterial({ color: GROUND_COLOR }),
+    groundMaterial,
   );
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = -0.05;
@@ -88,6 +100,10 @@ export function createEngine(container: HTMLElement): Engine {
     scene,
     camera,
     controls,
+    skyColor,
+    hemiLight,
+    sunLight,
+    groundMaterial,
     onFrame(callback) {
       frameCallbacks.add(callback);
       return () => frameCallbacks.delete(callback);
@@ -100,4 +116,16 @@ export function createEngine(container: HTMLElement): Engine {
       container.removeChild(renderer.domElement);
     },
   };
+}
+
+/** Applies a `time-of-day.ts` sample to the scene's sky/lights/ground (docs/tasks/T-27 §3). Cheap
+ * enough (colour copies + two intensity assignments) to call every render frame. */
+export function applyTimeOfDay(engine: Engine, sample: TimeOfDaySample): void {
+  engine.skyColor.copy(sample.background);
+  engine.hemiLight.color.copy(sample.hemiSky);
+  engine.hemiLight.groundColor.copy(sample.hemiGround);
+  engine.hemiLight.intensity = sample.hemiIntensity;
+  engine.sunLight.color.copy(sample.sunColor);
+  engine.sunLight.intensity = sample.sunIntensity;
+  engine.groundMaterial.color.copy(sample.ground);
 }

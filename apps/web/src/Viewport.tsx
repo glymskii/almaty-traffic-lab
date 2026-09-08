@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { loadNetwork } from "./data/loadNetwork.ts";
 import { ru } from "./i18n/ru.ts";
 import { CameraRig } from "./scene/camera.ts";
+import { buildCityLayers, type CityLayers } from "./scene/city.ts";
 import { createRenderFrame } from "./scene/interpolation.ts";
 import {
   buildStreetLabels,
@@ -13,9 +14,10 @@ import {
 } from "./scene/labels.ts";
 import { buildMarkings } from "./scene/markings.ts";
 import { createPedestrianInstances } from "./scene/pedestrians.ts";
-import { createEngine, type Engine } from "./scene/renderer.ts";
+import { applyTimeOfDay, createEngine, type Engine } from "./scene/renderer.ts";
 import { buildConnectorRibbons, buildRoadSurfaces } from "./scene/roads.ts";
 import { createSignalInstances } from "./scene/signals.ts";
+import { createTimeOfDaySample, sampleTimeOfDay } from "./scene/time-of-day.ts";
 import { disposeObject3D } from "./scene/util.ts";
 import { createVehicleInstances } from "./scene/vehicles.ts";
 import { type SimHandle, sampleStressFrame, startSim, wantsStressMode } from "./sim/client.ts";
@@ -63,6 +65,8 @@ export interface ViewportHandle {
   engine: Engine;
   rig: CameraRig;
   network: Network;
+  /** "Здания"/"Зелень и вода" layer groups (docs/tasks/T-27 §2) - the Обзор tab toggles `.visible` directly. */
+  cityLayers: CityLayers;
   /** Synchronous snapshot; undefined before warm-up finishes (prefer `onSimReady` unless polling). */
   getSim: () => SimHandle | undefined;
   /** Calls back once, when the sim becomes playable (immediately if it already is). */
@@ -72,6 +76,7 @@ export interface ViewportHandle {
 interface MountedScene {
   engine: Engine;
   rig: CameraRig;
+  cityLayers: CityLayers;
   getSim: () => SimHandle | undefined;
   onSimReady: (cb: (sim: SimHandle) => void) => () => void;
   cleanup: () => void;
@@ -94,6 +99,10 @@ function mountScene(
   engine.scene.add(roadSurfaces);
   engine.scene.add(markings);
   if (connectors) engine.scene.add(connectors);
+
+  const cityLayers = buildCityLayers(network);
+  engine.scene.add(cityLayers.buildings);
+  engine.scene.add(cityLayers.greenery);
 
   const labels = buildStreetLabels(network);
   for (const label of labels) engine.scene.add(label.object);
@@ -124,10 +133,26 @@ function mountScene(
   let disposed = false;
   const simReady = createOnceEmitter<SimHandle>();
 
+  // Sky/light/headlights by time of day (docs/tasks/T-27 §3). Derived from `simTimeS` rather than
+  // reading `FrameMeta.timeOfDayMin` directly: that field starts life hard-coded to 0 (midnight) in
+  // sim/client.ts's placeholder, before the worker's first `frame` message ever arrives, which
+  // `?? initialTimeOfDayMin` cannot catch (0 is not nullish) - `simTimeS` has no such placeholder
+  // ambiguity (0 elapsed really does mean "still at the configured start time", matching the
+  // fallback exactly), and mirrors SimClock.timeOfDayMin's own `(startTimeMin + simTimeS / 60) % 1440`.
+  const timeOfDaySample = createTimeOfDaySample();
+  const initialTimeOfDayMin = defaultSimConfig(configPatch).startTimeMin;
+
   const unsubscribeFrame = engine.onFrame((dtS) => {
     rig.update(dtS);
     updateLabelVisibility(engine.camera, labels);
     labelRenderer.render(engine.scene, engine.camera);
+
+    const timeOfDayMin = sim
+      ? (initialTimeOfDayMin + sim.latestFrameMeta().simTimeS / 60) % 1440
+      : initialTimeOfDayMin;
+    sampleTimeOfDay(timeOfDayMin, timeOfDaySample);
+    applyTimeOfDay(engine, timeOfDaySample);
+    vehicles.setHeadlightIntensity(timeOfDaySample.headlight);
 
     if (stress) {
       sampleStressFrame(renderFrame.simTimeS + dtS, renderFrame);
@@ -194,6 +219,7 @@ function mountScene(
   return {
     engine,
     rig,
+    cityLayers,
     getSim: () => sim,
     onSimReady: simReady.subscribe,
     cleanup: () => {
@@ -205,6 +231,8 @@ function mountScene(
       disposeObject3D(roadSurfaces);
       disposeObject3D(markings);
       if (connectors) disposeObject3D(connectors);
+      disposeObject3D(cityLayers.buildings);
+      disposeObject3D(cityLayers.greenery);
       disposeObject3D(vehicles.object);
       disposeObject3D(signals.object);
       disposeObject3D(pedestrians.object);
@@ -266,6 +294,7 @@ export function Viewport({ networkId, configPatch, onReady, onStatus }: Viewport
           engine: scene.engine,
           rig: scene.rig,
           network,
+          cityLayers: scene.cityLayers,
           getSim: scene.getSim,
           onSimReady: scene.onSimReady,
         });

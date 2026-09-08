@@ -27,7 +27,19 @@ src/
     camera.ts               CameraRig поверх OrbitControls: overview(network), плавный
                            focus(x, y, radius), WASD-панорамирование, ограничение наклона
     renderer.ts             WebGLRenderer, PerspectiveCamera, полусферический + направленный
-                           свет без теней, земля, resize (ResizeObserver), rAF-цикл (onFrame)
+                           свет без теней, земля, resize (ResizeObserver), rAF-цикл (onFrame).
+                           applyTimeOfDay(engine, sample) переносит time-of-day.ts на
+                           skyColor/hemiLight/sunLight/groundMaterial (T-27, вызывается каждый кадр)
+    time-of-day.ts          T-27: цвет неба/земли/света и сила фар по timeOfDayMin, день/вечер/
+                           ночь как 4 опорные точки на круге суток (ночь-день-вечер-ночь),
+                           линейная интерполяция THREE.Color между соседними; sampleTimeOfDay
+                           пишет в переданный `TimeOfDaySample`, без аллокаций на кадр
+    city.ts                 T-27: здания (ExtrudeGeometry по footprint, два цвета по heightM),
+                           парки/вода (ShapeGeometry, плоско чуть ниже полотна), реки (ribbon.ts)
+                           — все footprints одного вида склеены в один Mesh (mergeRibbons), итого
+                           ≤ 10 мешей на сеть независимо от числа зданий. Winding контуров
+                           нормализуется (shoelace) перед триангуляцией; одна плохая геометрия
+                           (самопересечение после упрощения в компиляторе) не валит весь слой
     interpolation.ts         чистая логика (без Three.js): FrameBuffers -> плавная поза машины.
                            Каждый id раскладывается в стабильный слот id % capacity (T-13:
                            id = slot + generation*capacity), слот хранит последние "from"/"to"
@@ -35,11 +47,16 @@ src/
                            через чужую позицию. lerpAngle — кратчайшая дуга; isBlinkOn — фаза
                            мигания (поворотники 2 Гц, мигающий зелёный светофора)
     vehicles.ts               InstancedMesh на деталь кузова (легковая: кузов+кабина, автобус/
-                           троллейбус: кузов(+2 штанги), плюс стоп-сигнал и 2 поворотника на
-                           машину), ёмкость = vehicleCapacity, индекс инстанса = id % capacity
+                           троллейбус: кузов(+2 штанги), плюс стоп-сигнал, 2 поворотника и 2 фары
+                           на машину), ёмкость = vehicleCapacity, индекс инстанса = id % capacity
                            (слот держит не больше одной машины разом). Неиспользуемые/пропавшие
                            инстансы скрываются масштабом 0, а не через mesh.count. Палитра легковых
-                           (carColorFor) — 6 приглушённых цветов по id % 6, такси — жёлтый
+                           (carColorFor) — 6 приглушённых цветов по id % 6, такси — жёлтый. Фары
+                           (T-27) стоят на месте у каждой активной машины всегда — тёмное/светлое
+                           время суток управляет не позицией, а `emissiveIntensity` материала
+                           через `setHeadlightIntensity(0..1)`, единую для всех разом (протокол
+                           `FrameBuffers.flags` — Uint8Array, все 8 бит заняты, нового флага «фары»
+                           не завести без правки контрактов, см. заметку в карточке T-27)
     signals.ts                Столб + головка на сигнальную группу (позиция — конец первой полосы
                            группы, вправо на 2 м): основная секция — 3 лампы (инстансы сфер),
                            arrow_left/right — 1 лампа сбоку. Индекс группы для FrameBuffers.
@@ -59,13 +76,19 @@ src/
                            повороты. Используется, когда скомпилированной сети нет
     loadNetwork.ts            fetch('/networks/<id>.network.json.gz') + DecompressionStream,
                            иначе demo-network.ts
-  Viewport.tsx                грузит сеть (`networkId` из пропсов), монтирует сцену, запускает
-                           sim/client.ts с переданным `configPatch` (прогрев по
-                           demand.warmupMinutes с прогресс-баром, затем play(1)) и на каждый
-                           тик rAF обновляет vehicles/signals/pedestrians (useEffect + cleanup).
+  Viewport.tsx                грузит сеть (`networkId` из пропсов), монтирует сцену (включая
+                           `cityLayers` из scene/city.ts), запускает sim/client.ts с переданным
+                           `configPatch` (прогрев по demand.warmupMinutes с прогресс-баром, затем
+                           play(1)) и на каждый тик rAF обновляет vehicles/signals/pedestrians
+                           (useEffect + cleanup), а также sky/свет/фары по времени суток —
+                           `timeOfDayMin` считается из `initialTimeOfDayMin + simTimeS/60`, а не
+                           читается из `FrameMeta.timeOfDayMin` напрямую: это поле в sim/client.ts
+                           стартует placeholder-нулём (полночь) до первого кадра воркера, и `?? `
+                           его не ловит (0 — не nullish); `simTimeS` такой двусмысленности не
+                           создаёт (0 = "время не прошло", ровно то же значение, что и до старта).
                            `ViewportHandle` (аргумент `onReady`) отдаёт `{ engine, rig, network,
-                           getSim, onSimReady }` — `onSimReady` стреляет один раз, когда прогрев
-                           закончился и `sim.play(1)` уже вызван (не раньше — воркер иначе
+                           cityLayers, getSim, onSimReady }` — `onSimReady` стреляет один раз, когда
+                           прогрев закончился и `sim.play(1)` уже вызван (не раньше — воркер иначе
                            отклонит `runUntil`), `getSim` — синхронный геттер той же ручки
   sim/client.ts                 (T-23) `SimHandle` дополнен `setParams`/`requestReport`/`onMetrics`/
                            `onReport`/`latestFrameMeta()` — тонкие проброс-обёртки над `SimClient`
@@ -107,7 +130,10 @@ src/
                            `store.test.ts` сверяет их с контрактом) + бюджет машин/такси в
                            выделенке с пометкой «требует перезапуска»
     OverviewTab.tsx                выбор сети, кнопки камеры (`rig.overview`/`rig.focus`),
-                           `<ParamsPanel/>`, легенда допущений
+                           переключатели слоёв «Здания»/«Зелень и вода» (T-27: локальный стейт
+                           компонента, не стор — при смене сети Viewport перемонтируется со
+                           свежими группами `cityLayers`, эффект переприменяет текущее состояние
+                           чекбоксов к ним), `<ParamsPanel/>`, легенда допущений
     Tooltip.tsx                    рейкаст курсора на плоскость y=0, ближайший узел/линк в
                            метрах (не меш-рейкаст: полотно дорог — общая геометрия без
                            привязки атрибутов к id линка/узла, см. ARCHITECTURE.md)
@@ -149,8 +175,7 @@ pnpm --filter @atl/web build    # то же, что pnpm build из корня
 pnpm --filter @atl/web test     # vitest, окружение jsdom (T-23: смоук-тест TimeBar на @testing-library/react)
 ```
 
-## Вне объёма (T-23)
+## Вне объёма (T-23/T-27)
 
 Содержимое вкладок «Узкие места»/«Сценарии»/«Сравнение» — заглушки со ссылкой на T-25/T-24/T-26
-соответственно (сама навигация между вкладками уже работает). Тепловая карта — T-25. Здания/парки/
-реки — T-27.
+соответственно (сама навигация между вкладками уже работает). Тепловая карта — T-25.
