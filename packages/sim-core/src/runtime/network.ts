@@ -179,6 +179,17 @@ export class RuntimeNetwork {
   /** Connector's Protection, see ProtectionCode. */
   readonly connProtection: Uint8Array;
 
+  // ---- connector crosswalk wiring (track-indexed; meaningless/empty for lanes) ----
+  /**
+   * CSR: the crosswalks a connector crosses and must yield to (`Connector.crosswalkIds`, T-15). Built
+   * here -- and only here -- because every other subsystem needs just the topology, never the
+   * pedestrian flow itself (see `pedestrians/crosswalks.ts`, which reads this to find the crosswalks
+   * of a connector without walking `Network` again).
+   */
+  readonly connCrosswalkStart: Int32Array;
+  readonly connCrosswalkCount: Int32Array;
+  readonly connCrosswalkList: Int32Array;
+
   constructor(net: Network, segmentLengthM: number) {
     // ---- ids ----
     this.nodeIds = net.nodes.map((n) => n.id);
@@ -512,10 +523,17 @@ export class RuntimeNetwork {
     }
     this.groupIsArrow = Uint8Array.from(groupIsArrow);
     this.crosswalkIds = net.crosswalks.map((c) => c.id);
+    const crosswalkIndex = indexOf(this.crosswalkIds);
 
-    // ---- connector signal wiring ----
+    // ---- connector signal and crosswalk wiring ----
     this.connSignalGroup = new Int32Array(trackCount).fill(-1);
     this.connProtection = new Uint8Array(trackCount);
+    this.connCrosswalkStart = new Int32Array(trackCount);
+    this.connCrosswalkCount = new Int32Array(trackCount);
+    let totalConnCrosswalks = 0;
+    for (const c of net.connectors) totalConnCrosswalks += c.crosswalkIds.length;
+    this.connCrosswalkList = new Int32Array(totalConnCrosswalks);
+    let cwCursor = 0;
     for (let c = 0; c < connectorCount; c++) {
       const conn = net.connectors[c];
       if (!conn) continue;
@@ -527,6 +545,11 @@ export class RuntimeNetwork {
           conn.signalGroupId,
           "signal group",
         );
+      }
+      this.connCrosswalkStart[t] = cwCursor;
+      this.connCrosswalkCount[t] = conn.crosswalkIds.length;
+      for (const cwId of conn.crosswalkIds) {
+        this.connCrosswalkList[cwCursor++] = mustIndex(crosswalkIndex, cwId, "crosswalk");
       }
     }
   }

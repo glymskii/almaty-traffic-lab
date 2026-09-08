@@ -1135,6 +1135,8 @@ export interface TJunctionOptions {
   lanes?: number;
   /** Unsignalized: minor road yields. Signalized: 2-phase plan. */
   signalized?: boolean;
+  /** Unregulated crosswalk (no signalGroupId) across one arm's exit. T-15, N18 tJunction case. */
+  crosswalkOnDir?: "E" | "W" | "S";
 }
 
 /** Main road with a minor road joining from the south. T-03. */
@@ -1180,7 +1182,7 @@ export function tJunction(opts: TJunctionOptions = {}): Network {
     return dir === "S" ? "yield" : "priority";
   };
 
-  const { connectors, approachLinkOf } = buildMovementConnectors(
+  const { connectors, approachLinkOf, exitArmConnectors } = buildMovementConnectors(
     arms,
     registry,
     centerId,
@@ -1236,12 +1238,38 @@ export function tJunction(opts: TJunctionOptions = {}): Network {
     ];
   }
 
+  const crosswalks: unknown[] = [];
+  if (opts.crosswalkOnDir) {
+    const dir = opts.crosswalkOnDir;
+    const crossPos = add(center, scale(DIR_VEC[dir], 8));
+    const perp = leftOf(DIR_VEC[dir]);
+    const halfW = (lanesN + 1) * LANE_WIDTH_M;
+    const p0: Vec2 = sub(crossPos, scale(perp, halfW));
+    const p1: Vec2 = add(crossPos, scale(perp, halfW));
+    const cwId = `cw.${dir}`;
+    const connectorIds = exitArmConnectors[dir] ?? [];
+    const connectorById = new Map(connectors.map((c) => [c.id, c]));
+    for (const cid of connectorIds) {
+      const c = connectorById.get(cid);
+      if (c) c.crosswalkIds.push(cwId);
+    }
+    // No signalGroupId: an unregulated zebra, vehicles always yield to present pedestrians.
+    crosswalks.push({
+      id: cwId,
+      nodeId: centerId,
+      geometry: [p0, p1],
+      lengthM: vecLength(sub(p1, p0)),
+      connectorIds,
+    });
+  }
+
   return finish({
     meta: meta("t-junction"),
     nodes,
     links,
     lanes,
     connectors,
+    crosswalks,
     signalControllers: controllers,
     gates,
   });
