@@ -10,6 +10,7 @@ import {
 import { type BBoxPreset, bboxCentre } from "../bboxes.ts";
 import type { OsmSnapshot } from "../importer/index.ts";
 import { createProjection } from "../projection.ts";
+import { runSignals } from "../signals/index.ts";
 import {
   type AssumptionEntry,
   type CompileStats,
@@ -27,6 +28,8 @@ export const GENERATOR = "@atl/map-data compiler 0.0.1";
 /** Stage registry wiring: `stages.ts` stays free of runtime imports of the stage modules. */
 const intersectionsStage = LATER_STAGES.find((s) => s.name === "intersections");
 if (intersectionsStage !== undefined) intersectionsStage.run = runIntersections;
+const signalsStage = LATER_STAGES.find((s) => s.name === "signals");
+if (signalsStage !== undefined) signalsStage.run = runSignals;
 
 export interface CompileOptions {
   bbox: BBoxPreset;

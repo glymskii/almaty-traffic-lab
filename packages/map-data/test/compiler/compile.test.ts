@@ -196,6 +196,10 @@ describe("compileNetwork on the mini fixture", () => {
     expect(byKind.bus_lane_hours_default?.count).toBe(2);
     expect(byKind.bus_lane_position_assumed).toBeUndefined();
     expect(byKind.turns_default?.count).toBe(16);
+    // Signals stage: one controller on the only signalized node, one left-turn mode per approach.
+    expect(byKind.signal_plan_default?.count).toBe(1);
+    expect(byKind.left_turn_permissive_default?.count).toBe(2);
+    expect(byKind.left_turn_prohibited_default?.count).toBe(1);
     expect(report.stats).toMatchObject({
       nodes: 7,
       links: 8,
@@ -220,7 +224,7 @@ describe("compileNetwork on the mini fixture", () => {
       "intersections: 2 lane(s) reach a junction with no permitted movement; " +
         "no vehicle may end up in them: w100_0_f:0, w301_0_b:0",
     ]);
-    expect(report.warnings).toHaveLength(5);
+    expect(report.warnings).toHaveLength(4);
     expect(report.linkLevels).toEqual({});
   });
 

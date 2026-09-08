@@ -113,7 +113,8 @@ describe("connectors on a 2x2 crossroads", () => {
       // Two directions of two lanes each.
       expect(cw.lengthM).toBeCloseTo(14, 5);
       expect(cw.geometry).toHaveLength(2);
-      expect(cw.signalGroupId).toBeUndefined();
+      // The intersections stage leaves the zebra groupless; the signals stage (T-08) fills it in.
+      expect(cw.signalGroupId).toBeDefined();
       expect(cw.connectorIds).toHaveLength(4);
       for (const cid of cw.connectorIds)
         expect(byId(crossroads).get(cid)?.crosswalkIds).toContain(cw.id);
