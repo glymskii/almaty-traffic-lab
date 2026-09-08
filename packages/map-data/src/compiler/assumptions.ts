@@ -18,6 +18,11 @@ export const ASSUMPTION_KINDS = [
   "acceleration_lane_default",
   "connector_priority_default",
   "crosswalk_default",
+  "signal_plan_default",
+  "left_turn_protected_default",
+  "left_turn_protected_permissive_default",
+  "left_turn_permissive_default",
+  "left_turn_prohibited_default",
   "gate_weight_default",
   "attractor_weight_default",
 ] as const;

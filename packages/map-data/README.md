@@ -97,7 +97,7 @@ pnpm run compile --bbox small --snapshot path.json.gz --out out.network.json.gz 
 | 1. Граф OSM | `osm-graph.ts` | Отбор way с `highway` из `HighwayClassSchema` кроме `service` (и кроме `area=yes`), разбор тегов в `WayAttrs`, проекция, отсечение по bbox: пересечение границы даёт вершину-ворота `ng<wayId>_<k>`; `oneway=-1` разворачивает порядок узлов |
 | 2. Топология | `topology.ts` | Разрезание на концах way, в узлах, которые делят ≥ 2 way, на воротах и на `highway=traffic_signals`; схлопывание светофоров ближе 30 м (вдоль дороги; `SIGNAL_COLLAPSE_M`) к перекрёстку в этот перекрёсток; склейка узлов степени 2 при полном совпадении атрибутов; типы и имена узлов |
 | 3. Линки и полосы | `links.ts`, `lanes.ts`, `speeds.ts` | По одному линку на направление, геометрия = осевая way, упрощённая Дугласом–Пекером 0,5 м и смещённая вправо на половину ширины своей проезжей части (`N · 3,5 / 2`; oneway без смещения); полосы, повороты, карманы, выделенки; provenance |
-| 4. Поздние стадии | `stages.ts` | `intersections` (T-07, реализована), `signals` (T-08), `transit` (T-17), `city` (T-27), `overrides` (T-24): вызываются, если задача заполнила `run`, иначе пропуск с предупреждением |
+| 4. Поздние стадии | `stages.ts` | `intersections` (T-07, реализована), `signals` (T-08, реализована), `transit` (T-17), `city` (T-27), `overrides` (T-24): вызываются, если задача заполнила `run`, иначе пропуск с предупреждением |
 | 5. Проверка и запись | `index.ts`, `write.ts` | `parseNetwork` + `checkNetworkIntegrity` (ошибка = исключение); `writeCompileOutputs` пишет `<bboxId>.network.json.gz` и `<bboxId>.assumptions.json` |
 
 `CompileReport`: `network`, `assumptions` (счётчики по видам с примером), `warnings` (уникальные строки),
@@ -226,7 +226,10 @@ POI из снимка (`node`/`way` с `center`): `shop=mall` 3.0 → `mall`, `a
 `speed_limit_default`, `lane_count_default`, `turns_default`, `left_pocket_default` (карман по правилу подхода),
 `pocket_length_default` (карман по тегу, длина по умолчанию), `bus_lane_hours_default`, `bus_lane_position_assumed`,
 `merge_node_default`, `acceleration_lane_default`, `connector_priority_default` (право проезда выведено правилом),
-`crosswalk_default`, `gate_weight_default`, `attractor_weight_default`.
+`crosswalk_default`, `signal_plan_default` (сгенерированный план светофора; счётчик = число контроллеров),
+`left_turn_protected_default`, `left_turn_protected_permissive_default`, `left_turn_permissive_default`,
+`left_turn_prohibited_default` (распределение типов левого поворота по правилу; счётчик — подходы),
+`gate_weight_default`, `attractor_weight_default`.
 `warnings` — неразобранные или противоречивые теги (`way <id>: …`) и пропущенные стадии. Файл
 `data/networks/<bboxId>.assumptions.json` содержит `stats`, `assumptions`, `warnings`, `linkLevels`.
 
@@ -239,3 +242,64 @@ POI из снимка (`node`/`way` с `center`): `shop=mall` 3.0 → `mall`, `a
 перекрёстка) плюс «Тимирязева» из двух склеиваемых way, уходящая за bbox. Тест на реальном снимке
 `data/osm/almaty-abay-small/snapshot.json.gz` пропускается, пока файла нет. Снимки из локальных метров
 собирает `test/compiler/helpers.ts` (`localSnapshot`).
+
+## Компилятор (T-08: планы светофоров)
+
+Стадия `signals` (`src/signals/index.ts`, `runSignals`) идёт сразу после `intersections` и даёт каждому узлу
+`kind: signalized` фиксированный план: группы, фазы, длительности по Вебстеру, `signalGroupId` и `protection`
+всем коннекторам узла и `signalGroupId` зебрам. Точки входа:
+
+| Функция | Модуль | Что делает |
+|---|---|---|
+| `generateController(net, nodeId, cfg, opts?)` | `signals/generate.ts` | Строит план узла с нуля, кладёт контроллер в `net.signalControllers` и размечает коннекторы и зебры. Возвращает `ControllerReport` (или `undefined`, если у узла нет ни одного движения) |
+| `regenerateController(net, nodeId, set, cfg)` | `signals/regenerate.ts` | Пересборка под `SignalOverride["set"]` (для T-24): `leftTurnModes`, `pedestrianPhase`, `cycleS`, `greenS` по группам, `offsetS` |
+| `buildGroups`, `buildAxes`, `buildPhases`, `websterPlan` | `signals/{groups,phases,webster}.ts` | Отдельные шаги, вынесены ради тестов |
+
+### Группы
+На каждый входящий линк — группа `main` (`sg.<linkId>.main`): сквозные, правые, развороты и левые, пока левый
+`permissive`. При `protected`/`protected_permissive` левые (и развороты) уезжают в `arrow_left`
+(`sg.<linkId>.arrow_left`). Секции `arrow_right` не бывает: правый всегда в `main`. Пешеходные группы —
+по одной на зебру узла (`sg.<crosswalkId>.ped`), только при `pedestrianPhase: true`. Id контроллера
+`<nodeId>.ctrl`, фазы `<nodeId>.ctrl.p<seq>`. Id групп выводятся из линка и зебры, а не из порядкового номера,
+поэтому переживают пересборку плана — сценарий T-24 может ссылаться на них в `greenS`.
+
+### Тип левого поворота (provenance `default`)
+`prohibited` — левых коннекторов нет вообще; `protected` — у подхода есть карман (`kind: turn_pocket`) **и** у
+встречного подхода (плечо более чем в 150° от этого) ≥ 2 сквозных полос; иначе `permissive`. Override сценария
+задаёт любой из четырёх режимов явно. Левые коннекторы `prohibited`-подхода остаются **без** группы и с
+`protection: yield`: ни одна фаза их не отпускает, а маршрутизация (T-12) читает `leftTurnModes`.
+
+### Оси и фазы
+Плечи узла разбиваются на оси: два плеча, направления которых расходятся более чем на 150°, — одна улица;
+плечо без такой пары — ось из одного плеча (так Т-образный узел получает «главная улица → ножка», а не фазу
+на подход). Оси идут по убыванию критического `y`. На каждую ось: ведущая фаза защищённых левых этой оси
+(если они есть), затем фаза сквозных и правых этой оси **вместе с пешеходными группами других осей** — зебра
+поперёк плеча параллельна транспорту улиц, которые это плечо не используют. Узел, все плечи которого попали
+в одну ось (пешеходный светофор степени 2), получает одну транспортную фазу; пешеходные группы, которых не
+взяла ни одна транспортная фаза, получают отдельную фазу в конце — это и есть двухфазный «транспорт /
+пешеходы». Пешеходы никогда не зелёные вместе с защищённой левой стрелкой.
+
+### Вебстер (`signals/webster.ts`)
+Спрос подхода предполагается: `q = 400 веh/ч × число сквозных полос × коэффициент класса` (trunk/`*_link` 1.5,
+primary 1.2, secondary 1.0, tertiary 0.7, residential/unclassified/living_street/service 0.4);
+`y = q / (s · n)`, `s = signals.saturationFlowVehPerHPerLane`. Потерянное время `L = Σ(yellow + allRed)` по всем
+фазам, `C = (1.5L + 5) / (1 − Σy)`, `Σy` обрезается сверху на 0.9 (насыщенный узел даёт предупреждение), сам `C` —
+в `[40, signals.maxCycleS]`. Зелёное время делится между сквозными фазами пропорционально `y` с минимумом
+`signals.minGreenS`; если минимумы не влезают, цикл растёт выше предела, а не голодает фаза. Ведущая фаза
+стрелки получает ~15 % цикла, обрезанные в 10…15 с; отдельная пешеходная фаза — время перехода самой длинной
+зебры при 1,3 м/с, не более 30 с. Деление на целые секунды детерминировано (остаток — по наибольшей дробной
+части, тай-брейк по индексу). `offsetS = 0`: координация — T-22.
+
+### Право проезда
+`protection` считается **на коннектор**, а не на группу: движение `protected`, если ни одно из его конфликтующих
+движений не бывает зелёным одновременно с его группой, иначе `permissive`. Так разрешённый левый не превращает
+сквозные движения своей же секции в «пропускай по зазорам» — та же конвенция, что у синтетических планов T-03.
+Отсюда критерий приёмки «ни одна фаза не отпускает пару конфликтующих защищённых движений» выполняется
+по построению.
+
+### Тесты
+`test/signals/webster.test.ts` — Вебстер и целочисленное деление на ручных числах; `test/signals/phases.test.ts` —
+оси на кресте и на трёхлучевом узле без противоположных плеч; `test/signals/generate.test.ts` и
+`test/signals/regenerate.test.ts` — на синтетических сетях T-03 `crossroads`/`tJunction` со снятыми планами
+(`test/signals/helpers.ts`, `stripControllers`) плюс приёмка на реальном снимке маленького квадрата.
+
