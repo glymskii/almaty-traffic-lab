@@ -1,4 +1,3 @@
-import { DebugWorkerView } from "./DebugWorkerView.tsx";
 import { ru } from "./i18n/ru.ts";
 import { Viewport } from "./Viewport.tsx";
 
@@ -7,9 +6,6 @@ import { Viewport } from "./Viewport.tsx";
  * around this same Viewport.
  */
 export function App() {
-  if (new URLSearchParams(window.location.search).get("debug") === "worker") {
-    return <DebugWorkerView />;
-  }
   return (
     <div className="app-shell">
       <header className="top-bar">
