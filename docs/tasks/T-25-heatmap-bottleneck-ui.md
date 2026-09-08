@@ -29,3 +29,7 @@
 
 ## Критерии приёмки
 - [ ] На маленьком квадрате в 08:00 виден Топ-10 с причинами, подлёт работает; `pnpm check` зелёный; тепловая карта не ломает 60 fps.
+
+## Заметки из ревью T-05 (учесть)
+- Базовый меш полотна (`surface-*`) окрашен одним vertex-color на полосу и по 25-метровым сегментам не делится. Тепловую карту строить отдельным слоем-оверлеем по сегментам из `SegmentDescriptor[]` теми же примитивами `slicePolyline` / `buildRibbonGeometry` / `mergeRibbons` из `scene/ribbon.ts` и `geometry/lane-geometry.ts`, чуть выше полотна, не трогая `roads.ts`.
+- Пересборка `s → (x, y, heading)`: `sampleAtS` + `laneAxis` в `geometry/lane-geometry.ts`, без зависимости от sim-core (важно и для T-13).

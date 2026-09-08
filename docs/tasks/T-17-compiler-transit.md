@@ -29,3 +29,6 @@ T-02 (маппинг OSM way → линки; нужна таблица `wayId �
 
 ## Критерии приёмки
 - [ ] Integrity пустой на маленьком квадрате с маршрутами; `pnpm check` зелёный.
+
+## Заметки из ревью T-02 (учесть)
+- Таблица `wayId → { forward: linkIds[], backward: linkIds[] }` в порядке вдоль way добавляется в `CompileReport.wayLinks` и `CompileContext` правками T-02; если её нет в `main`, сначала проверить ветку `task/T-02`.
