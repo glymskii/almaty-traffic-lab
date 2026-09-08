@@ -32,6 +32,10 @@ function smoothstep(t: number): number {
 export class CameraRig {
   private readonly pressed = new Set<string>();
   private flight: Flight | null = null;
+  // Scratch vectors reused every WASD frame instead of allocated - applyWasd runs on every frame a pan key is held.
+  private readonly wasdForward = new THREE.Vector3();
+  private readonly wasdRight = new THREE.Vector3();
+  private readonly wasdMove = new THREE.Vector3();
 
   constructor(
     private readonly camera: THREE.PerspectiveCamera,
@@ -51,8 +55,12 @@ export class CameraRig {
     this.pressed.delete(event.code);
   };
 
-  /** Frame the whole network from above at an angle. Falls back to a fixed-size view for an empty network. */
-  overview(network: Network): void {
+  /**
+   * Frame the whole network from above at an angle. Falls back to a fixed-size view for an empty
+   * network. `immediate` snaps instead of flying - use it for the first show, where a fly-in from
+   * the engine's arbitrary default position would just look like a glitch.
+   */
+  overview(network: Network, options?: { immediate?: boolean }): void {
     let minX = Number.POSITIVE_INFINITY;
     let maxX = Number.NEGATIVE_INFINITY;
     let minY = Number.POSITIVE_INFINITY;
@@ -69,10 +77,16 @@ export class CameraRig {
     const span = hasNodes ? Math.max(maxX - minX, maxY - minY, MIN_OVERVIEW_SPAN_M) : 300;
     const distance = span * 0.9;
 
-    this.flight = null;
-    this.controls.target.set(centerX, 0, -centerY);
-    this.camera.position.set(centerX, distance * 0.75, -centerY + distance);
-    this.controls.update();
+    const toTarget = new THREE.Vector3(centerX, 0, -centerY);
+    const toPos = new THREE.Vector3(centerX, distance * 0.75, -centerY + distance);
+    if (options?.immediate) {
+      this.flight = null;
+      this.controls.target.copy(toTarget);
+      this.camera.position.copy(toPos);
+      this.controls.update();
+      return;
+    }
+    this.startFlight(toPos, toTarget, DEFAULT_FOCUS_DURATION_S);
   }
 
   /** Smoothly fly to look at local map point (x, y) from a distance proportional to `radiusM`. */
@@ -80,6 +94,10 @@ export class CameraRig {
     const toTarget = new THREE.Vector3(x, 0, -y);
     const distance = Math.max(radiusM * 2.2, 15);
     const toPos = toTarget.clone().add(new THREE.Vector3(0, distance * 0.6, distance));
+    this.startFlight(toPos, toTarget, durationS);
+  }
+
+  private startFlight(toPos: THREE.Vector3, toTarget: THREE.Vector3, durationS: number): void {
     this.flight = {
       fromPos: this.camera.position.clone(),
       toPos,
@@ -109,13 +127,13 @@ export class CameraRig {
   }
 
   private applyWasd(dtS: number): void {
-    const forward = new THREE.Vector3();
+    const forward = this.wasdForward;
     this.camera.getWorldDirection(forward);
     forward.y = 0;
     forward.normalize();
-    const right = new THREE.Vector3().crossVectors(forward, this.camera.up).normalize();
+    const right = this.wasdRight.crossVectors(forward, this.camera.up).normalize();
 
-    const move = new THREE.Vector3();
+    const move = this.wasdMove.set(0, 0, 0);
     if (this.pressed.has("KeyW")) move.add(forward);
     if (this.pressed.has("KeyS")) move.sub(forward);
     if (this.pressed.has("KeyD")) move.add(right);
