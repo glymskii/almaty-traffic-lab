@@ -38,6 +38,8 @@ import { SignalRuntime } from "./runtime/signals.ts";
 import { TrajectoryHash } from "./runtime/trajectory-hash.ts";
 import { TURN_COUNT, TurnCode, turnBit } from "./runtime/turns.ts";
 import { VehiclePool } from "./runtime/vehicles.ts";
+import { BusScheduleRuntime, type TransitRoute } from "./transit/schedule.ts";
+import { BusStopRuntime } from "./transit/stops.ts";
 
 /**
  * The single public surface of sim-core. Everything else (IDM, MOBIL, signals, routing, buses,
@@ -244,6 +246,8 @@ const RNG_FORK_JUNCTIONS = 3;
 /** Route-cost noise of the tree copies (drawn once at init) and the per-driver route draws (T-12). */
 const RNG_FORK_ROUTES = 4;
 const RNG_FORK_OD = 5;
+/** Bus schedule offsets and dwell durations (T-14). */
+const RNG_FORK_TRANSIT = 6;
 
 /** Smoothing of the measured link travel time the navigators route on (T-12, alpha). */
 const LIVE_COST_ALPHA = 0.3;
@@ -261,6 +265,9 @@ const CAUSE_GAP_LEFT_TURN = causeCode("gap_left_turn");
 const CAUSE_YIELD_PRIORITY = causeCode("yield_priority");
 const CAUSE_GRIDLOCK = causeCode("gridlock");
 const CAUSE_DOWNSTREAM_SPILLBACK = causeCode("downstream_spillback");
+/** T-14: a scheduled bus stop dwell and, for the vehicles queued behind a dwelling bus, its cause. */
+const CAUSE_BUS_DWELL = causeCode("bus_dwell");
+const CAUSE_BEHIND_STOPPED_BUS = causeCode("behind_stopped_bus");
 
 /**
  * A vehicle giving way stops this far short of a conflict point. Slightly more than the occupancy
@@ -328,7 +335,13 @@ class SimulationImpl implements Simulation {
   private readonly routeRng: Rng;
   /** Origin-destination draws at spawn (T-12). */
   private readonly odRng: Rng;
+  /** Bus schedule offsets and dwell durations (T-14). */
+  private readonly transitRng: Rng;
   private readonly hash = new TrajectoryHash();
+
+  // ---- transit (T-14) ----
+  private readonly transitSchedule: BusScheduleRuntime;
+  private readonly transitStops: BusStopRuntime;
 
   // ---- lane changes (T-10) ----
   /** Lane each vehicle decided to move into this step, -1 = stay. Refilled every step. */
@@ -400,6 +413,7 @@ class SimulationImpl implements Simulation {
     this.junctionRng = master.fork(RNG_FORK_JUNCTIONS);
     this.routeRng = master.fork(RNG_FORK_ROUTES);
     this.odRng = master.fork(RNG_FORK_OD);
+    this.transitRng = master.fork(RNG_FORK_TRANSIT);
     this.pendingLane = new Int32Array(opts.config.demand.vehicleBudget).fill(-1);
     this.pendingLeader = new Int32Array(opts.config.demand.vehicleBudget).fill(-1);
     this.laneChangeBlocked = new Uint8Array(opts.config.demand.vehicleBudget);
@@ -464,6 +478,19 @@ class SimulationImpl implements Simulation {
     this.nextRerouteS = demand.rerouteIntervalS;
 
     this.arrivals = new ArrivalQueues(this.od.sourceCount, this.od.sourceShare, this.spawnRng);
+
+    // Transit (T-14): routes are a fixed chain of links, entirely independent of the OD/routing
+    // system above. Built last because `BusScheduleRuntime` needs `this.lanes` (bus-lane lookup for
+    // the entry lane) and the whole network is otherwise ready by this point.
+    this.transitSchedule = new BusScheduleRuntime(
+      opts.network,
+      this.runtime,
+      this.lanes,
+      this.transitRng,
+      opts.config.startTimeMin,
+      opts.config.peakHours,
+    );
+    this.transitStops = new BusStopRuntime(opts.network, this.runtime);
   }
 
   get config(): SimConfig {
@@ -486,6 +513,8 @@ class SimulationImpl implements Simulation {
     this.clock.advance();
     const dt = this.clock.dtS;
     const now = this.clock.simTimeS;
+    const peak = isPeakHour(this.cfg, this.clock.timeOfDayMin);
+    this.transitStops.update(this.pool, now, this.cfg.behavior, peak, this.transitRng); // 0a (T-14)
     this.updateSignals(now); // 1
     // 2 (pedestrians): later task.
     this.updateRoutes(now); // 3
@@ -496,6 +525,7 @@ class SimulationImpl implements Simulation {
     this.integrate(dt, now); // 7
     this.repairOrder();
     this.spawn(dt, now); // 8
+    this.spawnBuses(now, peak); // 9 (T-14)
     this.updatePositions(now);
     this.foldHash();
   }
@@ -1033,6 +1063,12 @@ class SimulationImpl implements Simulation {
     const link = rt.trackLink[lane] as number;
     pool.routeArrive[i] = 0;
     pool.routeNextLink[i] = -1;
+    // Buses follow a fixed chain of links (T-14), never the OD/navigator system below: recording
+    // their traversal into `liveTravelS` would poison it with dwell time no car ever pays.
+    if ((pool.busRoute[i] as number) >= 0) {
+      this.enterBusLink(i, lane);
+      return;
+    }
     if (link >= 0) this.recordLinkTravel(i, link, now);
 
     if (link >= 0 && this.turnSharesSet[link] !== 1 && (pool.routeDest[i] as number) >= 0) {
@@ -1070,6 +1106,52 @@ class SimulationImpl implements Simulation {
     pool.nextTrack[i] = this.lanes.connectorFor(lane, cls, turn);
   }
 
+  /**
+   * Bus/trolleybus continuation (T-14): the vehicle's route is `TransitRoute.linkSeq`, a fixed chain
+   * of links resolved once at construction, not the OD graph. Mirrors the shape of the OD branch of
+   * `enterLink` (same `routeConnector`/`turnTo` fallbacks), just driven by the route's own next link
+   * instead of a shortest-path tree, and always ends in `routeArrive` -- a bus route is a one-way trip
+   * from `entryNodeId` to `exitNodeId`, never a loop the vehicle keeps following.
+   */
+  private enterBusLink(i: number, lane: number): void {
+    const pool = this.pool;
+    const rt = this.runtime;
+    const route = this.transitSchedule.routes[pool.busRoute[i] as number] as TransitRoute;
+    const posIdx = (pool.busRouteLinkIdx[i] as number) + 1;
+    pool.busRouteLinkIdx[i] = posIdx;
+    pool.routeNextLink[i] = -1;
+    const cls = pool.cls[i] as number;
+    if (posIdx >= route.linkSeq.length - 1) {
+      // The current link is the route's last one: the trip ends at its far end (`exitNodeId`).
+      pool.routeArrive[i] = 1;
+      pool.intendedTurn[i] = TurnCode.through;
+      pool.nextTrack[i] = -1;
+      return;
+    }
+    const nextLink = route.linkSeq[posIdx + 1] as number;
+    const conn = this.routeConnector(lane, cls, nextLink);
+    if (conn >= 0) {
+      pool.routeNextLink[i] = nextLink;
+      pool.intendedTurn[i] = rt.connTurn[conn] as number;
+      pool.nextTrack[i] = conn;
+      return;
+    }
+    // The movement exists on the link but not from this lane: fall back to the mandatory lane change
+    // (T-10), same as a car whose route lane is not the one it entered on.
+    const turn = this.routingGraph.turnTo(rt.trackLink[lane] as number, nextLink);
+    if (turn >= 0) {
+      pool.routeNextLink[i] = nextLink;
+      pool.intendedTurn[i] = turn;
+      pool.nextTrack[i] = this.lanes.connectorFor(lane, cls, turn);
+      return;
+    }
+    // Should not happen on a well-formed route (consecutive links are connected, see
+    // contracts/src/integrity.ts): fall back to whatever the lane offers, rather than drop the bus.
+    const fallbackTurn = this.sampleTurn(lane, cls);
+    pool.intendedTurn[i] = fallbackTurn;
+    pool.nextTrack[i] = this.lanes.connectorFor(lane, cls, fallbackTurn);
+  }
+
   setTurnShares(linkId: string, shares: Partial<Record<TurnKind, number>>): void {
     const link = this.runtime.linkIndex.get(linkId);
     if (link === undefined) throw new Error(`setTurnShares: unknown link ${linkId}`);
@@ -1105,6 +1187,7 @@ class SimulationImpl implements Simulation {
     const cls = pool.cls;
     const nextTrack = pool.nextTrack;
     const cause = pool.cause;
+    const persistent = pool.persistentFlags;
     const tail = pool.trackTail;
     const lanes = this.lanes;
     const trackStart = rt.trackStartS;
@@ -1117,6 +1200,13 @@ class SimulationImpl implements Simulation {
     for (let i = 0; i < n; i++) {
       const t = track[i] as number;
       if (t < 0) continue;
+      // A bus dwelling at a stop (T-14) is held stationary by `BusStopRuntime`, not by the ordinary
+      // obstacle scan: it is not "obstructed", it is parked on purpose.
+      if (((persistent[i] as number) & VehicleFlag.DWELLING) !== 0) {
+        a[i] = 0;
+        cause[i] = CAUSE_BUS_DWELL;
+        continue;
+      }
       const vi = v[i] as number;
       const si = s[i] as number;
       const v0 = (trackSpeed[t] as number) * (pool.speedFactor[i] as number);
@@ -1155,7 +1245,13 @@ class SimulationImpl implements Simulation {
         const aLeader = this.accelTowardObstacle(i, vi, v0, gap, v[leader] as number);
         if (aLeader < acc) {
           acc = aLeader;
-          if (aFree - aLeader >= LEADER_BINDING_MPS2) c = CAUSE_LEADER;
+          if (aFree - aLeader >= LEADER_BINDING_MPS2) {
+            // N17: queued behind a bus dwelling `in_lane` (T-14) reports its own cause, not `leader`.
+            c =
+              ((persistent[leader] as number) & VehicleFlag.DWELLING) !== 0
+                ? CAUSE_BEHIND_STOPPED_BUS
+                : CAUSE_LEADER;
+          }
         }
       }
 
@@ -1434,12 +1530,18 @@ class SimulationImpl implements Simulation {
       const trip = now - (pool.spawnTimeS[i] as number);
       let delay = trip - (pool.freeFlowTimeS[i] as number);
       if (delay < 0) delay = 0;
+      // Occupancy by the hour the trip *ended* (T-14, item 4): a trip that straddles the peak
+      // boundary is counted by the crowding its passengers actually rode in on the way out.
+      const clsParams = this.cfg.vehicleClasses[VEHICLE_CLASS_BY_CODE[c] as VehicleClass];
+      const occupancy = isPeakHour(this.cfg, this.clock.timeOfDayMin)
+        ? clsParams.occupancyPeak
+        : clsParams.occupancyOffpeak;
+      pool.occupancy[i] = occupancy;
       this.completedByClass[c] = (this.completedByClass[c] as number) + 1;
       this.tripTimeByClass[c] = (this.tripTimeByClass[c] as number) + trip;
       this.delayByClass[c] = (this.delayByClass[c] as number) + delay;
       this.stopsByClass[c] = (this.stopsByClass[c] as number) + (pool.stops[i] as number);
-      this.personDelayByClass[c] =
-        (this.personDelayByClass[c] as number) + delay * (pool.occupancy[i] as number);
+      this.personDelayByClass[c] = (this.personDelayByClass[c] as number) + delay * occupancy;
     }
     pool.remove(i);
     pool.release(i);
@@ -1478,7 +1580,6 @@ class SimulationImpl implements Simulation {
     const pool = this.pool;
     const ratePerS = tripRatePerS(this.baseTripsPerHour, demand, this.clock.hourOfDay);
     const afterWarmup = now >= this.warmupEndS;
-    const peak = isPeakHour(cfg, this.clock.timeOfDayMin);
     const entryGapM = cfg.driver.minGapM.max;
     for (let s = 0; s < od.sourceCount; s++) {
       const share = od.sourceShare[s] as number;
@@ -1496,7 +1597,7 @@ class SimulationImpl implements Simulation {
           blockedByLane = true;
           break;
         }
-        this.place(lane, cls, clsParams, peak, now, afterWarmup, this.sampleDestFrom(s, lane));
+        this.place(lane, cls, clsParams, now, afterWarmup, this.sampleDestFrom(s, lane));
         this.arrivals.take(s);
       }
       if (blockedByLane && afterWarmup) this.spawnWaits += this.arrivals.claimUncounted(s);
@@ -1562,7 +1663,6 @@ class SimulationImpl implements Simulation {
     lane: number,
     cls: VehicleClass,
     clsParams: VehicleClassParams,
-    peak: boolean,
     now: number,
     afterWarmup: boolean,
     dest: number,
@@ -1570,15 +1670,7 @@ class SimulationImpl implements Simulation {
     const rt = this.runtime;
     const pool = this.pool;
     const i = pool.alloc();
-    sampleDriverInto(
-      pool,
-      i,
-      this.driverRng,
-      this.cfg.driver,
-      cls,
-      clsParams,
-      peak ? clsParams.occupancyPeak : clsParams.occupancyOffpeak,
-    );
+    sampleDriverInto(pool, i, this.driverRng, this.cfg.driver, cls, clsParams);
     const sSpawn = (rt.trackStartS[lane] as number) + (pool.length[i] as number);
     const v0 = (rt.trackSpeedMps[lane] as number) * (pool.speedFactor[i] as number);
     let vEntry = v0;
@@ -1609,6 +1701,12 @@ class SimulationImpl implements Simulation {
     pool.linkEnterS[i] = now;
     if (this.routeRng.chance(this.cfg.demand.navigatorShare)) persistent |= VehicleFlag.NAVIGATOR;
     pool.persistentFlags[i] = persistent;
+    // Reset the transit fields (T-14): a reused slot may have last held a bus, and `enterLink` below
+    // dispatches on `busRoute` -- a stale value here would misroute a plain car spawn.
+    pool.busRoute[i] = -1;
+    pool.busRouteLinkIdx[i] = -1;
+    pool.busStopIdx[i] = 0;
+    pool.dwellEndS[i] = 0;
     pool.targetLane[i] = -1;
     pool.laneChangeEndS[i] = 0;
     pool.laneChangeDir[i] = 0;
@@ -1631,6 +1729,98 @@ class SimulationImpl implements Simulation {
     const c = pool.cls[i] as number;
     this.activeByClass[c] = (this.activeByClass[c] as number) + 1;
     if (afterWarmup) this.spawnedByClass[c] = (this.spawnedByClass[c] as number) + 1;
+  }
+
+  /**
+   * Bus/trolleybus arrivals (T-14, item 1): unlike `spawn()`, a route is not a Poisson process over
+   * OD sources -- each fires on its own scheduled headway (`BusScheduleRuntime`), with a random offset
+   * for the very first departure. A route whose entry lane has no room simply keeps trying every
+   * step: `nextSpawnS` is not advanced until a bus actually enters, so a queue at the terminus does
+   * not silently push every later departure back by the same amount.
+   */
+  private spawnBuses(now: number, peak: boolean): void {
+    const schedule = this.transitSchedule;
+    const afterWarmup = now >= this.warmupEndS;
+    for (let r = 0; r < schedule.routeCount; r++) {
+      while ((schedule.nextSpawnS[r] as number) <= now) {
+        if (!this.placeBus(r, now, afterWarmup)) break;
+        schedule.advance(r, now, peak);
+      }
+    }
+  }
+
+  /**
+   * Places one bus/trolleybus of route `routeIdx` on its entry lane. Mirrors `place()` for cars, but
+   * with a fixed route instead of an OD destination (no taxi/violator/navigator draws), and
+   * `enterLink` -- via `enterBusLink` -- walks `TransitRoute.linkSeq` instead of a routing tree.
+   * Returns false when the entry lane has no room, so `spawnBuses` retries next step.
+   */
+  private placeBus(routeIdx: number, now: number, afterWarmup: boolean): boolean {
+    const route = this.transitSchedule.routes[routeIdx] as TransitRoute;
+    const rt = this.runtime;
+    const pool = this.pool;
+    const lane = route.entryLane;
+    const clsParams = this.cfg.vehicleClasses[route.clsName];
+    const needM = clsParams.lengthM + this.cfg.driver.minGapM.max;
+    const tail = pool.trackTail[lane] as number;
+    const gapAtEntry =
+      tail >= 0
+        ? (pool.s[tail] as number) -
+          (pool.length[tail] as number) -
+          (rt.trackStartS[lane] as number)
+        : Number.POSITIVE_INFINITY;
+    if (gapAtEntry < needM) return false;
+
+    const i = pool.alloc();
+    if (i < 0) return false; // vehicle budget exhausted; retried next step
+    sampleDriverInto(pool, i, this.driverRng, this.cfg.driver, route.clsName, clsParams);
+    const sSpawn = (rt.trackStartS[lane] as number) + (pool.length[i] as number);
+    const v0 = (rt.trackSpeedMps[lane] as number) * (pool.speedFactor[i] as number);
+    let vEntry = v0;
+    if (tail >= 0) {
+      const gap = (pool.s[tail] as number) - (pool.length[tail] as number) - sSpawn;
+      const vEq = (gap - (pool.minGap[i] as number)) / (pool.timeHeadway[i] as number);
+      if (vEq < vEntry) vEntry = vEq > 0 ? vEq : 0;
+    }
+    pool.s[i] = sSpawn;
+    pool.v[i] = vEntry;
+    pool.a[i] = 0;
+    pool.geomSeg[i] = 0;
+    // Scheduled transit never carries BUS_LANE_VIOLATOR or NAVIGATOR: it already runs its own lane.
+    pool.persistentFlags[i] = 0;
+    pool.routeDest[i] = -1;
+    pool.routeCopy[i] = 0;
+    pool.routeArrive[i] = 0;
+    pool.routeNextLink[i] = -1;
+    pool.routeLink[i] = -1;
+    pool.linkEnterS[i] = now;
+    pool.busRoute[i] = routeIdx;
+    pool.busRouteLinkIdx[i] = -1; // enterBusLink (via enterLink below) advances it to 0
+    pool.busStopIdx[i] = 0;
+    pool.dwellEndS[i] = 0;
+    pool.targetLane[i] = -1;
+    pool.laneChangeEndS[i] = 0;
+    pool.laneChangeDir[i] = 0;
+    pool.laneChangeFromOffsetM[i] = rt.trackOffsetM[lane] as number;
+    this.pendingLane[i] = -1;
+    this.laneChangeBlocked[i] = 0;
+    // Gridlock discipline is a property of the driver, drawn once, same as for cars (behavior.gridlockDiscipline).
+    this.gridlockDisciplined[i] = this.junctionRng.chance(this.cfg.behavior.gridlockDiscipline)
+      ? 1
+      : 0;
+    this.enterLink(i, lane, now);
+    pool.flags[i] = vEntry <= this.cfg.metrics.stoppedSpeedMps ? VehicleFlag.STOPPED : 0;
+    pool.cause[i] = CAUSE_FREE_FLOW;
+    pool.rootCause[i] = CAUSE_FREE_FLOW;
+    pool.spawnTimeS[i] = now;
+    pool.freeFlowTimeS[i] = ((rt.trackEndS[lane] as number) - sSpawn) / v0;
+    pool.stops[i] = 0;
+    pool.countsInStats[i] = afterWarmup ? 1 : 0;
+    pool.insert(lane, i);
+    const c = pool.cls[i] as number;
+    this.activeByClass[c] = (this.activeByClass[c] as number) + 1;
+    if (afterWarmup) this.spawnedByClass[c] = (this.spawnedByClass[c] as number) + 1;
+    return true;
   }
 
   /** World position and heading of every vehicle from its track polyline and lateral offset. */

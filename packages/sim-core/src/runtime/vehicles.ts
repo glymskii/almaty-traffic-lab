@@ -79,8 +79,18 @@ export class VehiclePool {
   readonly gapLeftTurn: Float32Array;
   readonly gapMerge: Float32Array;
   readonly gapPedestrian: Float32Array;
-  /** Persons on board, fixed at spawn from the class occupancy (peak/off-peak). */
+  /** Persons on board, set when the trip ends from the class occupancy by the hour it ended (peak/off-peak). */
   readonly occupancy: Float32Array;
+
+  // ---- transit (T-14) ----
+  /** Index into `BusScheduleRuntime.routes`, -1 = not a scheduled transit vehicle. */
+  readonly busRoute: Int32Array;
+  /** Index into the route's `linkSeq` of the link the vehicle is currently on, -1 before its first `enterLink`. */
+  readonly busRouteLinkIdx: Int32Array;
+  /** Index into the route's ordered stop list of the next stop still to check (monotonic per trip). */
+  readonly busStopIdx: Int32Array;
+  /** Simulation time the current dwell ends; 0 = not dwelling (`VehicleFlag.DWELLING` mirrors this). */
+  readonly dwellEndS: Float64Array;
 
   // ---- state ----
   /** Frame flags: `persistentFlags | per-step flags` (BRAKING, STOPPED, IN_INTERSECTION), rebuilt every step. */
@@ -147,6 +157,10 @@ export class VehiclePool {
     this.gapMerge = new Float32Array(capacity);
     this.gapPedestrian = new Float32Array(capacity);
     this.occupancy = new Float32Array(capacity);
+    this.busRoute = new Int32Array(capacity).fill(-1);
+    this.busRouteLinkIdx = new Int32Array(capacity).fill(-1);
+    this.busStopIdx = new Int32Array(capacity);
+    this.dwellEndS = new Float64Array(capacity);
     this.flags = new Uint8Array(capacity);
     this.persistentFlags = new Uint8Array(capacity);
     this.cause = new Uint8Array(capacity);
