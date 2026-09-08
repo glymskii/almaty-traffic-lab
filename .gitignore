@@ -13,3 +13,5 @@ test-results/
 # raw OSM tiles are committed compressed; never commit the uncompressed working copies
 data/osm/**/*.json
 !data/osm/**/*.json.gz
+# copied from data/networks/ by apps/web/scripts/copy-networks.mjs (predev/prebuild); data/ is the source of truth
+apps/web/public/networks/

@@ -5,7 +5,9 @@
   "type": "module",
   "description": "Three.js renderer + React UI. Reads frame buffers from sim-worker, never simulates anything itself.",
   "scripts": {
+    "predev": "node scripts/copy-networks.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/copy-networks.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json",
