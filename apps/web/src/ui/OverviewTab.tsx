@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ru } from "../i18n/ru.ts";
 import { computeAssumptionShares } from "../state/assumptions.ts";
 import { formatShare } from "../state/format.ts";
@@ -18,6 +18,17 @@ export function OverviewTab() {
   const networkKey = useStore((s) => s.networkKey);
   const setNetworkKey = useStore((s) => s.setNetworkKey);
   const viewport = useStore((s) => s.viewport);
+
+  // Layer switches (docs/tasks/T-27 §2). Kept as local component state, not in the global store:
+  // a network switch remounts Viewport with fresh city-layer groups (default visible), and this
+  // effect re-applies whatever the switches currently show onto that new `viewport` right away.
+  const [buildingsVisible, setBuildingsVisible] = useState(true);
+  const [greeneryVisible, setGreeneryVisible] = useState(true);
+  useEffect(() => {
+    if (!viewport) return;
+    viewport.cityLayers.buildings.visible = buildingsVisible;
+    viewport.cityLayers.greenery.visible = greeneryVisible;
+  }, [viewport, buildingsVisible, greeneryVisible]);
 
   const shares = useMemo(
     () => (viewport ? computeAssumptionShares(viewport.network) : []),
@@ -53,6 +64,26 @@ export function OverviewTab() {
             {ru.cameraCloseUp}
           </button>
         </div>
+      </section>
+
+      <section className="layer-toggles">
+        <h3>{ru.layersTitle}</h3>
+        <label className="param-row param-row-checkbox">
+          <input
+            type="checkbox"
+            checked={buildingsVisible}
+            onChange={(e) => setBuildingsVisible(e.target.checked)}
+          />
+          <span>{ru.layerBuildings}</span>
+        </label>
+        <label className="param-row param-row-checkbox">
+          <input
+            type="checkbox"
+            checked={greeneryVisible}
+            onChange={(e) => setGreeneryVisible(e.target.checked)}
+          />
+          <span>{ru.layerGreenery}</span>
+        </label>
       </section>
 
       <ParamsPanel />

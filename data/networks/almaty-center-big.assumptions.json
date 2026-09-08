@@ -1,0 +1,998 @@
+{
+  "networkId": "almaty-center-big",
+  "bboxId": "almaty-center-big",
+  "generatedAt": "2026-09-08T12:25:40.445Z",
+  "sourceHash": "a2d77ebeb42d19aa683bd0e27192d37307349f8e095f5469fca8207aa20cc16f",
+  "stats": {
+    "nodes": 2879,
+    "links": 6597,
+    "lanes": 10639,
+    "nodesByKind": {
+      "junction": 1686,
+      "signalized": 371,
+      "merge": 24,
+      "gate": 165,
+      "dead_end": 315,
+      "bend": 318
+    },
+    "speedDefaultShare": 0.861,
+    "laneCountDefaultShare": 0.622,
+    "turnsDefaultShare": 0.961,
+    "busLanes": 412,
+    "pockets": 312,
+    "totalLengthKm": 845.4,
+    "busRoutes": 70,
+    "busStops": 349
+  },
+  "assumptions": [
+    {
+      "kind": "speed_limit_default",
+      "count": 5681,
+      "example": "w4489474_0_f (проспект Абылай Хана)"
+    },
+    {
+      "kind": "lane_count_default",
+      "count": 3850,
+      "example": "w22576030_0_f (улица Шевченко)"
+    },
+    {
+      "kind": "turns_default",
+      "count": 10221,
+      "example": "w4489474_0_f:0"
+    },
+    {
+      "kind": "left_pocket_default",
+      "count": 255,
+      "example": "w23534971_1_f:0"
+    },
+    {
+      "kind": "pocket_length_default",
+      "count": 57,
+      "example": "w23444306_0_b:0"
+    },
+    {
+      "kind": "bus_lane_hours_default",
+      "count": 412,
+      "example": "w23989757_0_f:3"
+    },
+    {
+      "kind": "bus_lane_position_assumed",
+      "count": 19,
+      "example": "w314421873_0_f:2"
+    },
+    {
+      "kind": "merge_node_default",
+      "count": 24,
+      "example": "n11341351569"
+    },
+    {
+      "kind": "acceleration_lane_default",
+      "count": 1,
+      "example": "w539905162_0_f:1"
+    },
+    {
+      "kind": "connector_priority_default",
+      "count": 12830,
+      "example": "w1003870728_0_b:0>w1190521435_0_b:0"
+    },
+    {
+      "kind": "crosswalk_default",
+      "count": 3266,
+      "example": "n1020210743.x0"
+    },
+    {
+      "kind": "signal_plan_default",
+      "count": 371,
+      "example": "n10601731298.ctrl"
+    },
+    {
+      "kind": "left_turn_protected_default",
+      "count": 91,
+      "example": "w911110044_0_b"
+    },
+    {
+      "kind": "left_turn_permissive_default",
+      "count": 577,
+      "example": "w1150608573_0_f"
+    },
+    {
+      "kind": "left_turn_prohibited_default",
+      "count": 350,
+      "example": "w1106613146_0_b"
+    },
+    {
+      "kind": "gate_weight_default",
+      "count": 165,
+      "example": "ng104156164_0.gate"
+    },
+    {
+      "kind": "attractor_weight_default",
+      "count": 792,
+      "example": "poi.n259994991"
+    },
+    {
+      "kind": "bus_headway_peak_default",
+      "count": 70,
+      "example": "route.r1621297"
+    },
+    {
+      "kind": "bus_headway_offpeak_default",
+      "count": 64,
+      "example": "route.r1621297"
+    },
+    {
+      "kind": "bus_stop_kind_default",
+      "count": 349,
+      "example": "stop.n442569618"
+    }
+  ],
+  "warnings": [
+    "way 23534971: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 26538801: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 26538810: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 38231643: lanes=1 on a two-way street; assuming one lane backward (default)",
+    "way 53275456: lanes=1 on a two-way street; assuming one lane backward (default)",
+    "way 53276944: lanes=1 on a two-way street; assuming one lane backward (default)",
+    "way 122738812: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 124838804: lanes=2 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 124838808: lanes=2 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 124841590: lanes=3 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 154454124: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 171222597: turn:lanes on a two-way street is ambiguous (use turn:lanes:forward/backward); ignored",
+    "way 171222597: busway=right is not modelled (only busway=lane)",
+    "way 171222603: turn:lanes on a two-way street is ambiguous (use turn:lanes:forward/backward); ignored",
+    "way 171222603: busway=right is not modelled (only busway=lane)",
+    "way 171931247: bus/psv:lanes has 4 entries but the forward direction has 3 lanes",
+    "way 186752316: lanes=1 on a two-way street; assuming one lane backward (default)",
+    "way 186752465: lanes=1 on a two-way street; assuming one lane backward (default)",
+    "way 206984892: turn:lanes has 2 entries but the forward direction has 3 lanes; turn:lanes ignored",
+    "way 208481608: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 208493047: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 218875096: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 236779644: lanes=1 contradicts turn:lanes with 2 entries on a one-way street; using turn:lanes",
+    "way 255741278: turn:lanes on a two-way street is ambiguous (use turn:lanes:forward/backward); ignored",
+    "way 255741278: busway=right is not modelled (only busway=lane)",
+    "way 255779462: turn:lanes has 3 entries but the backward direction has 2 lanes; turn:lanes ignored",
+    "way 257454109: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 257724840: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 258486982: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 313445158: turn:lanes has 2 entries but the backward direction has 3 lanes; turn:lanes ignored",
+    "way 314421873: busway:left=lane is on the left of travel; modelled as the rightmost lane",
+    "way 314421874: busway:left=lane is on the left of travel; modelled as the rightmost lane",
+    "way 333558546: lanes=3 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 334057429: lanes=3 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 338969172: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 338969174: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 384959694: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 401356215: psv:lanes designates lane 1 of 2 (not the rightmost); modelled as the rightmost lane",
+    "way 428742143: psv:lanes designates lane 1 of 2 (not the rightmost); modelled as the rightmost lane",
+    "way 432527725: turn:lanes has 2 entries but the backward direction has 3 lanes; turn:lanes ignored",
+    "way 446405100: lanes=3 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 466184807: psv:lanes designates lane 1 of 2 (not the rightmost); modelled as the rightmost lane",
+    "way 466184808: lanes:psv=1 on a two-way street without direction; assuming a bus lane in both directions",
+    "way 466184809: psv:lanes designates lane 1 of 2 (not the rightmost); modelled as the rightmost lane",
+    "way 466184814: turn:lanes on a two-way street is ambiguous (use turn:lanes:forward/backward); ignored",
+    "way 466184814: lanes:psv=1 on a two-way street without direction; assuming a bus lane in both directions",
+    "way 466184816: psv:lanes designates lane 1 of 2 (not the rightmost); modelled as the rightmost lane",
+    "way 531179424: lanes=1 on a two-way street; assuming one lane backward (default)",
+    "way 531179425: lanes=1 on a two-way street; assuming one lane backward (default)",
+    "way 531179426: lanes=1 on a two-way street; assuming one lane backward (default)",
+    "way 531179427: lanes=1 on a two-way street; assuming one lane backward (default)",
+    "way 531179428: lanes=1 on a two-way street; assuming one lane backward (default)",
+    "way 531179429: lanes=1 on a two-way street; assuming one lane backward (default)",
+    "way 533944161: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 533944200: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 539985267: lanes=3 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 539985272: lanes=1 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 539985282: turn:lanes has 3 entries but the forward direction has 2 lanes; turn:lanes ignored",
+    "way 553241948: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 578353327: unknown oneway=\"reversible\"; treated as two-way",
+    "way 615943293: the only lane backward is a bus lane; adding a general lane (default)",
+    "way 690355199: busway:left=lane is on the left of travel; modelled as the rightmost lane",
+    "way 691199388: lanes:psv=1 on a two-way street without direction; assuming a bus lane in both directions",
+    "way 692910542: psv:lanes designates lane 1 of 2 (not the rightmost); modelled as the rightmost lane",
+    "way 692910574: bus:lanes designates lane 1 of 4 (not the rightmost); modelled as the rightmost lane",
+    "way 692910574: the only lane backward is a bus lane; adding a general lane (default)",
+    "way 692910574: turn:lanes has 1 entries but the backward direction has 2 lanes; turn:lanes ignored",
+    "way 693656421: lanes=2 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 693656423: lanes=3 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 693656426: lanes=3 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 693656427: lanes=3 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 693656431: lanes=2 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 693656432: lanes=2 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 693656433: lanes=2 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 698152174: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 702593086: turn:lanes on a two-way street is ambiguous (use turn:lanes:forward/backward); ignored",
+    "way 722580112: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 730450911: lanes=1 on a two-way street; assuming one lane backward (default)",
+    "way 751465279: lanes=3 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 910800278: psv:lanes designates lane 1 of 2 (not the rightmost); modelled as the rightmost lane",
+    "way 911115666: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 912322698: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 912325187: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 912363096: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 920716689: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 920731516: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 921282854: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 1044674826: lanes=3 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 1085590533: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 1117045979: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 1132394664: lanes=1 on a two-way street; assuming one lane backward (default)",
+    "way 1176280927: lanes=1 on a two-way street; assuming one lane backward (default)",
+    "way 1185785531: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 1185785532: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 1191271918: turn:lanes on a two-way street is ambiguous (use turn:lanes:forward/backward); ignored",
+    "way 1191271918: lanes:psv=1 on a two-way street without direction; assuming a bus lane in both directions",
+    "way 1191271918: the only lane backward is a bus lane; adding a general lane (default)",
+    "way 1191271921: lanes:psv=1 on a two-way street without direction; assuming a bus lane in both directions",
+    "way 1191271921: the only lane backward is a bus lane; adding a general lane (default)",
+    "way 1191575348: lanes:psv=1 on a two-way street without direction; assuming a bus lane in both directions",
+    "way 1191575348: the only lane backward is a bus lane; adding a general lane (default)",
+    "way 1208249028: lanes=1 on a two-way street; assuming one lane backward (default)",
+    "way 1208249029: lanes=1 on a two-way street; assuming one lane backward (default)",
+    "way 1211482741: busway:left=lane is on the left of travel; modelled as the rightmost lane",
+    "way 1240364424: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 1240708075: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 1279020894: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 1304251224: busway=designated is not modelled (only busway=lane)",
+    "way 1304251225: busway=designated is not modelled (only busway=lane)",
+    "way 1304251226: busway=designated is not modelled (only busway=lane)",
+    "way 1306961098: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 1311158946: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 1311158947: busway=designated is not modelled (only busway=lane)",
+    "way 1312808649: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 1326103708: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 1348647375: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 1356123647: busway:left=lane is on the left of travel; modelled as the rightmost lane",
+    "way 1361117795: turn:lanes has 3 entries but the forward direction has 2 lanes; turn:lanes ignored",
+    "way 1380159112: lanes=3 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 1380159113: lanes=3 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 1387790168: lanes=1 on a two-way street; assuming one lane backward (default)",
+    "way 1389768831: lanes=2 contradicts turn:lanes with 1 entries on a one-way street; using turn:lanes",
+    "way 1409697570: turn:lanes has 3 entries but the forward direction has 2 lanes; turn:lanes ignored",
+    "way 1409697571: turn:lanes has 3 entries but the forward direction has 2 lanes; turn:lanes ignored",
+    "way 1414112451: lanes=2 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 1414112452: turn:lanes on a two-way street is ambiguous (use turn:lanes:forward/backward); ignored",
+    "way 1414112453: turn:lanes on a two-way street is ambiguous (use turn:lanes:forward/backward); ignored",
+    "way 1419680688: lanes=2 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 1422516723: lanes=1 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 1422516725: lanes=2 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 1427251650: busway:left=lane is on the left of travel; modelled as the rightmost lane",
+    "way 1428240092: bus:lanes designates 2 lanes; only one bus lane per direction is modelled",
+    "way 1447143758: turn:lanes on a two-way street is ambiguous (use turn:lanes:forward/backward); ignored",
+    "way 1447143758: lanes:psv=1 on a two-way street without direction; assuming a bus lane in both directions",
+    "way 1447143760: turn:lanes on a two-way street is ambiguous (use turn:lanes:forward/backward); ignored",
+    "way 1447143760: lanes:psv=1 on a two-way street without direction; assuming a bus lane in both directions",
+    "way 1447143760: the only lane backward is a bus lane; adding a general lane (default)",
+    "way 1447143762: lanes:psv=1 on a two-way street without direction; assuming a bus lane in both directions",
+    "way 1447143763: lanes:psv=1 on a two-way street without direction; assuming a bus lane in both directions",
+    "way 1447143763: the only lane backward is a bus lane; adding a general lane (default)",
+    "way 1447143764: lanes:psv=1 on a two-way street without direction; assuming a bus lane in both directions",
+    "way 1447143764: the only lane backward is a bus lane; adding a general lane (default)",
+    "way 1447143769: turn:lanes on a two-way street is ambiguous (use turn:lanes:forward/backward); ignored",
+    "way 1447143769: lanes:psv=1 on a two-way street without direction; assuming a bus lane in both directions",
+    "way 1450165110: busway:left=lane is on the left of travel; modelled as the rightmost lane",
+    "way 1451574484: turn:lanes on a two-way street is ambiguous (use turn:lanes:forward/backward); ignored",
+    "way 1451574484: busway=right is not modelled (only busway=lane)",
+    "way 1451574485: turn:lanes on a two-way street is ambiguous (use turn:lanes:forward/backward); ignored",
+    "way 1451574485: busway=right is not modelled (only busway=lane)",
+    "way 1451574486: turn:lanes on a two-way street is ambiguous (use turn:lanes:forward/backward); ignored",
+    "way 1451574486: busway=right is not modelled (only busway=lane)",
+    "way 1451574487: turn:lanes on a two-way street is ambiguous (use turn:lanes:forward/backward); ignored",
+    "way 1451574487: busway=right is not modelled (only busway=lane)",
+    "way 1451574488: turn:lanes on a two-way street is ambiguous (use turn:lanes:forward/backward); ignored",
+    "way 1451574488: busway=right is not modelled (only busway=lane)",
+    "way 1451574490: turn:lanes on a two-way street is ambiguous (use turn:lanes:forward/backward); ignored",
+    "way 1451574490: busway=right is not modelled (only busway=lane)",
+    "way 1458313378: lanes:psv=1 on a two-way street without direction; assuming a bus lane in both directions",
+    "way 1458313378: the only lane forward is a bus lane; adding a general lane (default)",
+    "way 1464454135: turn:lanes on a two-way street is ambiguous (use turn:lanes:forward/backward); ignored",
+    "way 1464454136: turn:lanes on a two-way street is ambiguous (use turn:lanes:forward/backward); ignored",
+    "way 1464454137: turn:lanes on a two-way street is ambiguous (use turn:lanes:forward/backward); ignored",
+    "way 1464454138: turn:lanes on a two-way street is ambiguous (use turn:lanes:forward/backward); ignored",
+    "way 1482433326: lanes=1 on a two-way street; assuming one lane backward (default)",
+    "way 1492220605: turn:lanes has 2 entries but the forward direction has 3 lanes; turn:lanes ignored",
+    "way 1500994125: turn:lanes has 3 entries but the forward direction has 2 lanes; turn:lanes ignored",
+    "way 1511192977: busway:left=lane is on the left of travel; modelled as the rightmost lane",
+    "way 1511192978: busway:left=lane is on the left of travel; modelled as the rightmost lane",
+    "way 1522660681: lanes=2 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 1533842999: turn:lanes has 3 entries but the forward direction has 2 lanes; turn:lanes ignored",
+    "way 1536413808: turn:lanes has 3 entries but the forward direction has 2 lanes; turn:lanes ignored",
+    "way 1537934981: the only lane forward is a bus lane; adding a general lane (default)",
+    "way 1539636984: turn:lanes has 3 entries but the backward direction has 2 lanes; turn:lanes ignored",
+    "way 1540299539: busway:left=lane is on the left of travel; modelled as the rightmost lane",
+    "way 1540299540: bus/psv:lanes has 3 entries but the forward direction has 1 lanes",
+    "way 1540299540: the only lane forward is a bus lane; adding a general lane (default)",
+    "way 1544185502: psv:lanes designates lane 1 of 2 (not the rightmost); modelled as the rightmost lane",
+    "way 1544185503: psv:lanes designates lane 1 of 2 (not the rightmost); modelled as the rightmost lane",
+    "way 1545314879: lanes=1 on a two-way street; assuming one lane backward (default)",
+    "way 1545314880: lanes=1 on a two-way street; assuming one lane backward (default)",
+    "way 1545314902: lanes=1 on a two-way street; assuming one lane backward (default)",
+    "way 1552498512: busway:left=opposite_lane is not modelled (only busway=lane)",
+    "way 1553930391: turn:lanes has 3 entries but the forward direction has 2 lanes; turn:lanes ignored",
+    "way 1553930392: turn:lanes has 3 entries but the forward direction has 2 lanes; turn:lanes ignored",
+    "way 1553930395: turn:lanes has 3 entries but the forward direction has 2 lanes; turn:lanes ignored",
+    "way 1554809624: psv:lanes designates lane 1 of 2 (not the rightmost); modelled as the rightmost lane",
+    "node ng1084717829_0: gate only 3.42 m from a junction; weights set to 0 (no traffic is born or removed here)",
+    "node ng1388681518_0: gate only 3.3 m from a junction; weights set to 0 (no traffic is born or removed here)",
+    "node ng372881463_0: gate only 2.99 m from a junction; weights set to 0 (no traffic is born or removed here)",
+    "node ng375971957_0: gate only 0.42 m from a junction; weights set to 0 (no traffic is born or removed here)",
+    "node ng608768083_0: gate only 3.15 m from a junction; weights set to 0 (no traffic is born or removed here)",
+    "node ng771298826_0: gate only 1.91 m from a junction; weights set to 0 (no traffic is born or removed here)",
+    "intersections: 571 lane(s) reach a junction with no permitted movement; no vehicle may end up in them: w1038946518_0_f:0, w1038946519_0_f:0, w104156164_0_b:0, w1085590532_0_f:1, w1085951127_0_b:0, ... (571 in total)",
+    "transit: 349 bus stop(s) attached within 30 m of a route link, 219 unattached (discarded)",
+    "transit: 109 route relation(s), 70 compiled (64 truncated to their longest piece), 39 discarded (fewer than 2 links inside the bbox)",
+    "way 27054580: no usable geometry for a footprint; skipped",
+    "way 27054597: no usable geometry for a footprint; skipped",
+    "way 27064507: no usable geometry for a footprint; skipped",
+    "way 27107724: no usable geometry for a footprint; skipped",
+    "way 27320461: no usable geometry for a footprint; skipped",
+    "way 27480946: no usable geometry for a footprint; skipped",
+    "way 27482328: no usable geometry for a footprint; skipped",
+    "way 27482803: no usable geometry for a footprint; skipped",
+    "way 27482822: no usable geometry for a footprint; skipped",
+    "way 41531501: no usable geometry for a footprint; skipped",
+    "way 41531545: no usable geometry for a footprint; skipped",
+    "way 41531550: no usable geometry for a footprint; skipped",
+    "way 41531551: no usable geometry for a footprint; skipped",
+    "way 41531623: no usable geometry for a footprint; skipped",
+    "way 41586421: no usable geometry for a footprint; skipped",
+    "way 42648529: no usable geometry for a footprint; skipped",
+    "way 42648531: no usable geometry for a footprint; skipped",
+    "way 42650899: no usable geometry for a footprint; skipped",
+    "way 50065137: no usable geometry for a footprint; skipped",
+    "way 50304648: no usable geometry for a footprint; skipped",
+    "way 50459830: no usable geometry for a footprint; skipped",
+    "way 50648294: no usable geometry for a footprint; skipped",
+    "way 50648311: no usable geometry for a footprint; skipped",
+    "way 50651504: no usable geometry for a footprint; skipped",
+    "way 50651587: no usable geometry for a footprint; skipped",
+    "way 50652258: no usable geometry for a footprint; skipped",
+    "way 50652261: no usable geometry for a footprint; skipped",
+    "way 50654566: no usable geometry for a footprint; skipped",
+    "way 50655510: no usable geometry for a footprint; skipped",
+    "way 50655547: no usable geometry for a footprint; skipped",
+    "way 50876651: no usable geometry for a footprint; skipped",
+    "way 50876652: no usable geometry for a footprint; skipped",
+    "way 50876696: no usable geometry for a footprint; skipped",
+    "way 50876711: no usable geometry for a footprint; skipped",
+    "way 50878588: no usable geometry for a footprint; skipped",
+    "way 50898957: no usable geometry for a footprint; skipped",
+    "way 50898959: no usable geometry for a footprint; skipped",
+    "way 51008177: no usable geometry for a footprint; skipped",
+    "way 51008183: no usable geometry for a footprint; skipped",
+    "way 51008185: no usable geometry for a footprint; skipped",
+    "way 51155743: no usable geometry for a footprint; skipped",
+    "way 51155893: no usable geometry for a footprint; skipped",
+    "way 51155895: no usable geometry for a footprint; skipped",
+    "way 51214868: no usable geometry for a footprint; skipped",
+    "way 51267940: no usable geometry for a footprint; skipped",
+    "way 51267943: no usable geometry for a footprint; skipped",
+    "way 51275796: no usable geometry for a footprint; skipped",
+    "way 51275969: no usable geometry for a footprint; skipped",
+    "way 51337134: no usable geometry for a footprint; skipped",
+    "way 51337141: no usable geometry for a footprint; skipped",
+    "way 51337226: no usable geometry for a footprint; skipped",
+    "way 51337228: no usable geometry for a footprint; skipped",
+    "way 51337231: no usable geometry for a footprint; skipped",
+    "way 51337277: no usable geometry for a footprint; skipped",
+    "way 51348140: no usable geometry for a footprint; skipped",
+    "way 51348149: no usable geometry for a footprint; skipped",
+    "way 51350303: no usable geometry for a footprint; skipped",
+    "way 51350391: no usable geometry for a footprint; skipped",
+    "way 51354113: no usable geometry for a footprint; skipped",
+    "way 51354276: no usable geometry for a footprint; skipped",
+    "way 51354288: no usable geometry for a footprint; skipped",
+    "way 51354338: no usable geometry for a footprint; skipped",
+    "way 54660920: no usable geometry for a footprint; skipped",
+    "way 54660922: no usable geometry for a footprint; skipped",
+    "way 57370800: no usable geometry for a footprint; skipped",
+    "way 90961564: no usable geometry for a footprint; skipped",
+    "way 112931261: no usable geometry for a footprint; skipped",
+    "way 142742605: no usable geometry for a footprint; skipped",
+    "way 142742607: no usable geometry for a footprint; skipped",
+    "way 142743485: no usable geometry for a footprint; skipped",
+    "way 182897085: no usable geometry for a footprint; skipped",
+    "way 189199960: no usable geometry for a footprint; skipped",
+    "way 189481333: no usable geometry for a footprint; skipped",
+    "way 193284413: no usable geometry for a footprint; skipped",
+    "way 206625288: no usable geometry for a footprint; skipped",
+    "way 210709746: no usable geometry for a footprint; skipped",
+    "way 218948538: no usable geometry for a footprint; skipped",
+    "way 218948539: no usable geometry for a footprint; skipped",
+    "way 219002027: no usable geometry for a footprint; skipped",
+    "way 219002033: no usable geometry for a footprint; skipped",
+    "way 219232718: no usable geometry for a footprint; skipped",
+    "way 233387047: no usable geometry for a footprint; skipped",
+    "way 247006982: no usable geometry for a footprint; skipped",
+    "way 247373000: no usable geometry for a footprint; skipped",
+    "way 247430507: no usable geometry for a footprint; skipped",
+    "way 253581315: no usable geometry for a footprint; skipped",
+    "way 263327237: no usable geometry for a footprint; skipped",
+    "way 270082680: no usable geometry for a footprint; skipped",
+    "way 288425065: no usable geometry for a footprint; skipped",
+    "way 289161136: no usable geometry for a footprint; skipped",
+    "way 319580930: no usable geometry for a footprint; skipped",
+    "way 334772447: no usable geometry for a footprint; skipped",
+    "way 334783321: no usable geometry for a footprint; skipped",
+    "way 365956062: no usable geometry for a footprint; skipped",
+    "way 412826976: no usable geometry for a footprint; skipped",
+    "way 466832455: no usable geometry for a footprint; skipped",
+    "way 489771499: no usable geometry for a footprint; skipped",
+    "way 634582643: no usable geometry for a footprint; skipped",
+    "way 635099024: no usable geometry for a footprint; skipped",
+    "way 722177195: no usable geometry for a footprint; skipped",
+    "way 765716174: no usable geometry for a footprint; skipped",
+    "way 801525144: no usable geometry for a footprint; skipped",
+    "way 1041673996: no usable geometry for a footprint; skipped",
+    "way 1148828088: no usable geometry for a footprint; skipped",
+    "way 1282123750: no usable geometry for a footprint; skipped",
+    "way 1295616256: no usable geometry for a footprint; skipped",
+    "way 1316012221: no usable geometry for a footprint; skipped",
+    "way 1374939017: no usable geometry for a footprint; skipped",
+    "way 1414807351: no usable geometry for a footprint; skipped",
+    "way 1420967930: no usable geometry for a footprint; skipped",
+    "way 1455789657: degenerate after 1 m simplification; skipped",
+    "way 1457184895: no usable geometry for a footprint; skipped",
+    "way 1457752096: no usable geometry for a footprint; skipped",
+    "way 1458064098: no usable geometry for a footprint; skipped",
+    "way 1458074153: no usable geometry for a footprint; skipped",
+    "way 1458250211: no usable geometry for a footprint; skipped",
+    "way 1458785461: no usable geometry for a footprint; skipped",
+    "way 1459001243: no usable geometry for a footprint; skipped",
+    "way 1459001268: no usable geometry for a footprint; skipped",
+    "way 1463752036: no usable geometry for a footprint; skipped",
+    "way 1463752051: no usable geometry for a footprint; skipped",
+    "relation 3150696 outer way 234004118: outer member has no usable geometry; skipped",
+    "relation 3159962 outer way 234807132: outer member has no usable geometry; skipped",
+    "relation 3159962 outer way 490420248: outer member has no usable geometry; skipped",
+    "relation 3205773 outer way 237888568: outer member has no usable geometry; skipped",
+    "relation 3923812 outer way 295165683: degenerate after 1 m simplification; skipped",
+    "relation 8810349 outer way 633585031: outer member has no usable geometry; skipped",
+    "relation 8810349 outer way 633585032: outer member has no usable geometry; skipped",
+    "relation 8810350 outer way 633585031: outer member has no usable geometry; skipped",
+    "relation 8810350 outer way 208907479: outer member has no usable geometry; skipped",
+    "relation 10060166 outer way 337387070: degenerate after 1 m simplification; skipped",
+    "relation 10060166 outer way 727082611: degenerate after 1 m simplification; skipped",
+    "relation 10321410 outer way 747767181: outer member has no usable geometry; skipped",
+    "relation 18222061 outer way 1328890980: outer member has no usable geometry; skipped",
+    "relation 18227216 outer way 1329197895: degenerate after 1 m simplification; skipped",
+    "relation 18227216 outer way 1329197893: outer member has no usable geometry; skipped",
+    "relation 18242375 outer way 1330218123: outer member has no usable geometry; skipped",
+    "relation 18242376 outer way 1330218123: outer member has no usable geometry; skipped",
+    "relation 18254582 outer way 1331123534: outer member has no usable geometry; skipped",
+    "relation 18254582 outer way 1331123533: outer member has no usable geometry; skipped",
+    "relation 18254582 outer way 1331123539: outer member has no usable geometry; skipped",
+    "relation 18254582 outer way 1331123536: outer member has no usable geometry; skipped",
+    "relation 18254588 outer way 1331123564: outer member has no usable geometry; skipped",
+    "relation 18254588 outer way 1331123567: outer member has no usable geometry; skipped",
+    "relation 18254588 outer way 1331123529: outer member has no usable geometry; skipped",
+    "relation 18268170 outer way 1332422587: outer member has no usable geometry; skipped",
+    "relation 18284085 outer way 1333566873: outer member has no usable geometry; skipped",
+    "relation 18293070 outer way 1334474757: outer member has no usable geometry; skipped",
+    "relation 18293070 outer way 1334474761: outer member has no usable geometry; skipped",
+    "relation 18293070 outer way 1334474760: outer member has no usable geometry; skipped",
+    "relation 18293071 outer way 1334474758: outer member has no usable geometry; skipped",
+    "relation 18293071 outer way 1334474757: outer member has no usable geometry; skipped",
+    "relation 18293074 outer way 1334474758: outer member has no usable geometry; skipped",
+    "relation 18293074 outer way 1334474761: outer member has no usable geometry; skipped",
+    "relation 18293074 outer way 1334474760: outer member has no usable geometry; skipped",
+    "relation 18296898 outer way 1334799143: outer member has no usable geometry; skipped",
+    "relation 18355268 outer way 1339182709: degenerate after 1 m simplification; skipped",
+    "relation 18355268 outer way 1339182708: degenerate after 1 m simplification; skipped",
+    "relation 18355268 outer way 1339182703: outer member has no usable geometry; skipped",
+    "relation 18355268 outer way 1339182705: outer member has no usable geometry; skipped",
+    "relation 18355268 outer way 1339182704: outer member has no usable geometry; skipped",
+    "relation 18594108 outer way 1353729944: outer member has no usable geometry; skipped",
+    "relation 18594109 outer way 1353729944: outer member has no usable geometry; skipped",
+    "relation 18594109 outer way 1353729942: degenerate after 1 m simplification; skipped",
+    "relation 18594109 outer way 1353729943: degenerate after 1 m simplification; skipped",
+    "relation 18594110 outer way 1353729943: degenerate after 1 m simplification; skipped",
+    "relation 18594111 outer way 1353729942: degenerate after 1 m simplification; skipped",
+    "relation 18594111 outer way 1353729939: degenerate after 1 m simplification; skipped",
+    "relation 19248848 outer way 1394916380: outer member has no usable geometry; skipped",
+    "relation 19248848 outer way 1394916379: outer member has no usable geometry; skipped",
+    "relation 19248848 outer way 1394916376: outer member has no usable geometry; skipped",
+    "relation 19248848 outer way 1394916385: outer member has no usable geometry; skipped",
+    "relation 19248848 outer way 1394916384: outer member has no usable geometry; skipped",
+    "relation 19248848 outer way 1394916382: outer member has no usable geometry; skipped",
+    "stage \"overrides\" (T-24) is not implemented yet; skipped"
+  ],
+  "linkLevels": {
+    "w22733286_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w24041886_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w24041886_0_b": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w24042613_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w24042613_0_b": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w26776159_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": false
+    },
+    "w27464064_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": false
+    },
+    "w30812513_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w30908770_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w31626466_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w40755916_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w40755935_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w48795298_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w48795298_0_b": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w48795301_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w48795302_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w48795304_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w49854536_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": true
+    },
+    "w123856538_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w123856538_0_b": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w124838807_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": true
+    },
+    "w124976535_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": true
+    },
+    "w125617974_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": true
+    },
+    "w125617974_0_b": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": true
+    },
+    "w166814201_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": false
+    },
+    "w166814201_1_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": false
+    },
+    "w207810522_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": true
+    },
+    "w207810547_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": true
+    },
+    "w207810596_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": true
+    },
+    "w208320434_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": true
+    },
+    "w208320454_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": false
+    },
+    "w208320458_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": true
+    },
+    "w208320468_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": true
+    },
+    "w208320471_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": false
+    },
+    "w208514983_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w208514983_0_b": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w216580775_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": false
+    },
+    "w216580793_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": false
+    },
+    "w216580809_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w216580809_0_b": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w216580811_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w216580811_0_b": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w227962954_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": false
+    },
+    "w238257649_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": true
+    },
+    "w245024073_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": false
+    },
+    "w245024074_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": false
+    },
+    "w245024075_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": true
+    },
+    "w245024076_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": true
+    },
+    "w250412742_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": true
+    },
+    "w292947735_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w292947735_0_b": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w292962015_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w292962015_0_b": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w324837523_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": true
+    },
+    "w332247032_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w384228359_0_f": {
+      "layer": 0,
+      "bridge": false,
+      "tunnel": true
+    },
+    "w384228359_0_b": {
+      "layer": 0,
+      "bridge": false,
+      "tunnel": true
+    },
+    "w405538066_0_f": {
+      "layer": 0,
+      "bridge": false,
+      "tunnel": true
+    },
+    "w405538066_0_b": {
+      "layer": 0,
+      "bridge": false,
+      "tunnel": true
+    },
+    "w466850669_0_f": {
+      "layer": 1,
+      "bridge": false,
+      "tunnel": false
+    },
+    "w466850669_0_b": {
+      "layer": 1,
+      "bridge": false,
+      "tunnel": false
+    },
+    "w539905160_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w566005204_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": true
+    },
+    "w630928093_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w635590560_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w658704845_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w690355198_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w690355198_0_b": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w693656430_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": true
+    },
+    "w722580112_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w832182556_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w1084717830_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w1084717830_0_b": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w1085951127_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w1085951127_0_b": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w1117045979_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w1132394664_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": false
+    },
+    "w1132394664_0_b": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": false
+    },
+    "w1132394664_1_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": false
+    },
+    "w1132394664_1_b": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": false
+    },
+    "w1132394664_2_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": false
+    },
+    "w1132394664_2_b": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": false
+    },
+    "w1177470991_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": true
+    },
+    "w1177470991_0_b": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": true
+    },
+    "w1273895206_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w1273895206_0_b": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w1292156358_0_f": {
+      "layer": 1,
+      "bridge": false,
+      "tunnel": false
+    },
+    "w1292156358_0_b": {
+      "layer": 1,
+      "bridge": false,
+      "tunnel": false
+    },
+    "w1311158947_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w1326103717_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w1326103717_0_b": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w1339251594_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w1339251595_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w1410828917_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": false
+    },
+    "w1410828917_0_b": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": false
+    },
+    "w1446661447_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": false
+    },
+    "w1446661447_0_b": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": false
+    },
+    "w1462547471_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": true
+    },
+    "w1462547471_0_b": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": true
+    }
+  }
+}
