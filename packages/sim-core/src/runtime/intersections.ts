@@ -1,5 +1,5 @@
 import type { Network } from "@atl/contracts";
-import { SignalState } from "@atl/contracts";
+import { SignalState, VehicleFlag } from "@atl/contracts";
 import { ConflictTable, PriorityCode } from "./conflicts.ts";
 import { NodeKindCode, type RuntimeNetwork } from "./network.ts";
 import { TURN_COUNT, TurnCode } from "./turns.ts";
@@ -135,12 +135,20 @@ export class IntersectionRuntime {
    * while that vehicle is standing: a moving exit is discharging and will have made room by the time
    * anyone reaches it, so it must not throttle an ordinary saturation flow. What the gridlock rule
    * is about is an exit that has stopped (N19).
+   *
+   * A vehicle dwelling at a scheduled bus stop (T-14, `VehicleFlag.DWELLING`) is stopped on purpose,
+   * not stuck: without this exclusion a bus stopping near the start of an exit lane would read as
+   * "exit full", making disciplined drivers refuse the junction (`downstream_spillback`) and crossing
+   * movements see `gridlock` for a stop that clears itself on schedule (see the T-14 card notes).
    */
   private freeRoomOn(pool: VehiclePool, lane: number, stoppedSpeedMps: number): number {
     if (lane < 0) return Number.POSITIVE_INFINITY;
     const last = pool.trackTail[lane] as number;
     if (last < 0) return Number.POSITIVE_INFINITY;
     if ((pool.v[last] as number) > stoppedSpeedMps) return Number.POSITIVE_INFINITY;
+    if (((pool.persistentFlags[last] as number) & VehicleFlag.DWELLING) !== 0) {
+      return Number.POSITIVE_INFINITY;
+    }
     return (
       (pool.s[last] as number) -
       (pool.length[last] as number) -

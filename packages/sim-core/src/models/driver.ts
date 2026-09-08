@@ -15,7 +15,6 @@ export function sampleDriverInto(
   driver: DriverParams,
   cls: VehicleClass,
   clsParams: VehicleClassParams,
-  occupancy: number,
 ): void {
   pool.cls[i] = VEHICLE_CLASS_CODE[cls];
   pool.length[i] = clsParams.lengthM;
@@ -29,5 +28,5 @@ export function sampleDriverInto(
   pool.gapLeftTurn[i] = rng.sample(driver.criticalGapLeftTurnS);
   pool.gapMerge[i] = rng.sample(driver.criticalGapMergeS);
   pool.gapPedestrian[i] = rng.sample(driver.criticalGapPedestrianS);
-  pool.occupancy[i] = occupancy;
+  // Occupancy is set at the trip's end (`SimulationImpl.despawn`), by the hour it ended, not at spawn.
 }
