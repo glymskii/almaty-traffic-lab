@@ -48,6 +48,23 @@ export class VehiclePool {
   /** -1 = changing to the left, +1 = to the right, 0 = not changing. */
   readonly laneChangeDir: Int8Array;
 
+  // ---- route (T-12) ----
+  /**
+   * Destination of the trip as an index into `OdModel.destNodes`, -1 = no route (the vehicle drives
+   * by the fallback manoeuvre draw until it leaves the network).
+   */
+  readonly routeDest: Int32Array;
+  /** Which perturbed copy of the static route forest this driver follows (see `RouteTrees`). */
+  readonly routeCopy: Uint8Array;
+  /** 1 when the route says the trip ends at the end of the current link (an attractor, not a gate). */
+  readonly routeArrive: Uint8Array;
+  /** Link the route asks for after the current one, -1 = none (arrival, or no route). */
+  readonly routeNextLink: Int32Array;
+  /** Link the vehicle is on, -1 before its first one; the key of the live travel-time measurement. */
+  readonly routeLink: Int32Array;
+  /** Simulation time at which the vehicle entered `routeLink`. */
+  readonly linkEnterS: Float64Array;
+
   // ---- vehicle and driver ----
   readonly cls: Uint8Array;
   readonly length: Float32Array;
@@ -111,6 +128,12 @@ export class VehiclePool {
     this.laneChangeEndS = new Float64Array(capacity);
     this.laneChangeFromOffsetM = new Float32Array(capacity);
     this.laneChangeDir = new Int8Array(capacity);
+    this.routeDest = new Int32Array(capacity).fill(-1);
+    this.routeCopy = new Uint8Array(capacity);
+    this.routeArrive = new Uint8Array(capacity);
+    this.routeNextLink = new Int32Array(capacity).fill(-1);
+    this.routeLink = new Int32Array(capacity).fill(-1);
+    this.linkEnterS = new Float64Array(capacity);
     this.cls = new Uint8Array(capacity);
     this.length = new Float32Array(capacity);
     this.speedFactor = new Float32Array(capacity);

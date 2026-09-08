@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { TurnCode } from "../../src/runtime/turns.ts";
 import { createSimulation, kernelOf } from "../../src/simulation.ts";
 import { crossroads, saturationMultiplier } from "../fixtures/builders.ts";
+import { withProhibitedLefts } from "../routing/prohibited.ts";
 
 const WARMUP_MIN = 3;
 const RUN_MIN = 10;
@@ -341,5 +342,74 @@ describe("N12 arrow off = prohibited", () => {
 });
 
 describe("N13 prohibited left", () => {
-  it.todo("no vehicle uses a left connector; routing sends left-bound trips around the block");
+  /**
+   * Runs a crossroads whose left turns are banned and reports how often a vehicle was seen on a
+   * left connector, together with the trip counters. `keepConnectors` decides how the ban is
+   * expressed: the builder can leave the movement out of the network altogether, or the signal
+   * generator can keep it and give it no signal group (T-08), which is the case routing has to
+   * walk around rather than merely not find.
+   */
+  function runWithoutLefts(keepConnectors: boolean) {
+    const base = crossroads({ leftPocketM: 60, leftTurnMode: "permissive" });
+    const network = keepConnectors
+      ? withProhibitedLefts(base, "center")
+      : crossroads({ leftPocketM: 60, leftTurnMode: "prohibited" });
+    const config = defaultSimConfig({
+      seed: 5,
+      demand: {
+        multiplier: saturationMultiplier(network) * 0.5,
+        warmupMinutes: 2,
+        vehicleBudget: 4000,
+      },
+    });
+    const sim = createSimulation({ network, config });
+    const { runtime, pool, intersections } = kernelOf(sim);
+    const leftTracks: number[] = [];
+    for (let c = 0; c < runtime.connectorCount; c++) {
+      const t = runtime.laneCount + c;
+      if ((runtime.connViaNode[c] as number) !== (runtime.nodeIndex.get("center") as number)) {
+        continue;
+      }
+      if ((runtime.connTurn[t] as number) === TurnCode.left) leftTracks.push(t);
+    }
+    let onLeft = 0;
+    let intendingLeft = 0;
+    sim.runUntil(2 * 60);
+    while (sim.simTimeS < 12 * 60) {
+      sim.step();
+      for (const t of leftTracks) {
+        for (let i = pool.trackTail[t] as number; i >= 0; i = pool.ahead[i] as number) onLeft++;
+      }
+      for (let i = 0; i < pool.highWater; i++) {
+        if ((pool.track[i] as number) < 0) continue;
+        if ((pool.intendedTurn[i] as number) === TurnCode.left) intendingLeft++;
+      }
+    }
+    return {
+      leftTracks,
+      onLeft,
+      intendingLeft,
+      prohibited: leftTracks.filter((t) => intersections.connProhibited[t] === 1).length,
+      dropped: kernelOf(sim).droppedVehicles,
+      stats: sim.tripStats(),
+    };
+  }
+
+  it("no vehicle uses a left connector and no route even intends one, yet the trips complete", () => {
+    const kept = runWithoutLefts(true);
+    // The movements really are still in the network, and really are impassable.
+    expect(kept.leftTracks.length).toBeGreaterThan(0);
+    expect(kept.prohibited).toBe(kept.leftTracks.length);
+    expect(kept.onLeft).toBe(0);
+    expect(kept.intendingLeft).toBe(0);
+    expect(kept.dropped).toBe(0);
+    expect(kept.stats.total.completed).toBeGreaterThan(100);
+
+    // The same ban expressed by leaving the connectors out: the trips still complete, and the
+    // left-bound demand goes to the destinations it can still reach.
+    const removed = runWithoutLefts(false);
+    expect(removed.leftTracks.length).toBe(0);
+    expect(removed.dropped).toBe(0);
+    expect(removed.stats.total.completed).toBeGreaterThan(100);
+  }, 60000);
 });
