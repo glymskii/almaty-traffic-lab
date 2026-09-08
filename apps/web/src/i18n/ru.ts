@@ -3,5 +3,6 @@ export const ru = {
   appTitle: "Almaty Traffic Lab",
   attribution: "© Соавторы OpenStreetMap, ODbL",
   loadingNetwork: "Загрузка сети…",
+  warmingUp: "Прогрев симуляции…",
   loadError: "Не удалось загрузить сеть",
 } as const;
