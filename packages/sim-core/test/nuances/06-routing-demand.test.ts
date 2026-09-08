@@ -4,7 +4,7 @@
 import { defaultSimConfig, type Network } from "@atl/contracts";
 import { describe, expect, it } from "vitest";
 import { createSimulation, kernelOf } from "../../src/simulation.ts";
-import { corridor } from "../fixtures/builders.ts";
+import { corridor, crossroads } from "../fixtures/builders.ts";
 
 /**
  * The corridor with its parallel residential street, with only the two ends of the arterial
@@ -80,8 +80,57 @@ describe("N21 navigator re-routing", () => {
   });
 });
 
+/**
+ * A crossroads whose north approach is the one under pressure: half of its demand turns left,
+ * permissively and without a pocket, while the other three arms only go straight. The north-south
+ * street holds 70 % of the green, so a red light is not what limits the north approach -- the gaps
+ * in the opposing through flow are.
+ */
+const TIPPING_NETWORK = crossroads({
+  leftPocketM: 0,
+  leftTurnMode: "permissive",
+  greenSplitNS: 0.7,
+});
+const TIPPING_TRIPS_PER_HOUR = 2000;
+const TIPPING_WARMUP_MIN = 3;
+const TIPPING_RUN_MIN = 10;
+
+function reportAtMultiplier(multiplier: number) {
+  const sim = createSimulation({
+    network: TIPPING_NETWORK,
+    config: defaultSimConfig({
+      seed: 1,
+      demand: {
+        tripsPerHourPeak: TIPPING_TRIPS_PER_HOUR,
+        multiplier,
+        warmupMinutes: TIPPING_WARMUP_MIN,
+        vehicleBudget: 4000,
+      },
+    }),
+  });
+  kernelOf(sim).setTurnShares("N.in", { left: 0.5, through: 0.5 });
+  for (const dir of ["E", "S", "W"]) kernelOf(sim).setTurnShares(`${dir}.in`, { through: 1 });
+  sim.runUntil((TIPPING_WARMUP_MIN + TIPPING_RUN_MIN) * 60);
+  return sim.report();
+}
+
 describe("N22 demand tipping point", () => {
-  it.todo(
-    "demand multiplier 0.5 produces no bottleneck; 1.5 produces one on the expected approach",
-  );
+  it("demand multiplier 0.5 produces no bottleneck; 1.5 produces one on the expected approach", {
+    timeout: 120_000,
+  }, () => {
+    const light = reportAtMultiplier(0.5);
+    // Traffic is not free -- a signal always costs something -- but nothing passes all three
+    // conditions of D11 at half the demand.
+    expect(light.totals.delayVehH).toBeGreaterThan(0);
+    expect(light.items).toEqual([]);
+
+    const heavy = reportAtMultiplier(1.5);
+    expect(heavy.items.length).toBeGreaterThan(0);
+    const top = heavy.items[0];
+    expect(top?.id).toBe("N.in:center");
+    expect(top?.nodeId).toBe("center");
+    expect(top?.title).toBe("center, подход с севера");
+    // Three times the demand of the light run buys much more than three times the delay.
+    expect(heavy.totals.delayVehH).toBeGreaterThan(light.totals.delayVehH * 3);
+  });
 });

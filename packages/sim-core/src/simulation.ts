@@ -23,6 +23,7 @@ import {
 import { OdModel } from "./demand/od.ts";
 import { tripRatePerS } from "./demand/profile.ts";
 import { ArrivalQueues } from "./demand/spawner.ts";
+import { BottleneckDetector } from "./detector/report.ts";
 import { MetricsAccumulators } from "./metrics/accumulators.ts";
 import { RootCauseResolver } from "./metrics/rootCause.ts";
 import { SegmentIndex } from "./metrics/segments.ts";
@@ -377,6 +378,8 @@ class SimulationImpl implements Simulation {
   /** Public so `kernelOf` can hand T-19 the stops and V/C the frame has no room for. */
   readonly metricsWindow: MetricsAccumulators;
   private readonly totalsTracker: TotalsTracker;
+  /** Bottleneck detector (T-19); built once, reuses its own metrics frame across reports. */
+  private readonly detector: BottleneckDetector;
   /** Persons per vehicle of each class in the current hour; refreshed at every metrics sample. */
   private readonly occupancyByClass = new Float64Array(CLASS_COUNT);
   private nextSampleS: number;
@@ -556,6 +559,12 @@ class SimulationImpl implements Simulation {
       metricsCfg.windowS,
     );
     this.totalsTracker = new TotalsTracker(metricsCfg.windowS);
+    this.detector = new BottleneckDetector(
+      opts.network,
+      this.runtime,
+      this.segmentIndex,
+      metricsCfg.windowS,
+    );
     this.nextSampleS = metricsCfg.sampleIntervalS;
   }
 
@@ -2096,15 +2105,18 @@ class SimulationImpl implements Simulation {
     return f;
   }
 
-  /** The detector and its ranked items arrive with T-19; the totals are real from T-18 on. */
+  /**
+   * Ranked bottlenecks over the current window (T-19). A pure read of the same window `writeMetrics`
+   * exposes: calling it more or less often changes nothing about the numbers.
+   */
   report(): BottleneckReport {
-    return {
-      simTimeS: this.clock.simTimeS,
-      timeOfDayMin: this.clock.timeOfDayMin,
-      windowS: this.cfg.metrics.windowS,
-      totals: this.totals(),
-      items: [],
-    };
+    return this.detector.run(
+      this.cfg,
+      this.clock.simTimeS,
+      this.clock.timeOfDayMin,
+      this.totals(),
+      this.metricsWindow,
+    );
   }
 
   private totals(): NetworkTotals {
