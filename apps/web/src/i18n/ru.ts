@@ -172,4 +172,42 @@ export const ru = {
   intersectionOffset: "Смещение начала цикла, с",
   intersectionPedestrianPhase: "Отдельная пешеходная фаза",
   intersectionGreenTitle: "Зелёный по группам, с",
+
+  // Bottlenecks tab (docs/tasks/T-25).
+  bottlenecksEmpty: "Отчёт об узких местах ещё не готов — идёт прогрев симуляции.",
+  bottlenecksNoItems: "Сейчас на сети нет узких мест, подходящих под критерии D11.",
+  bottlenecksSortVehH: "По машино-часам",
+  bottlenecksSortPersonH: "По человеко-часам",
+  bottlenecksColRank: "#",
+  bottlenecksColTitle: "Место",
+  bottlenecksColDelay: "Задержка",
+  bottlenecksVcLabel: "V/C",
+  bottlenecksQueueLabel: "Очередь",
+  bottlenecksSpeedRatioLabel: "Скорость к свободной",
+  bottlenecksPersistenceLabel: "Устойчивость затора",
+  bottlenecksCausesTitle: "Причины задержки",
+  bottlenecksCausesOther: "Остальное (вне списка причин)",
+  bottlenecksRecommendationsTitle: "Рекомендации",
+  bottlenecksNoRecommendations:
+    "Готового сценария нет — отредактируйте перекрёсток или улицу вручную во вкладке «Сценарии».",
+  bottlenecksApply: "Применить в сценарии",
+  bottlenecksApplyDisabledHint: "Это решение не выражается изменением сети напрямую",
+  bottlenecksApplied: (name: string) => `Добавлено в сценарий «${name}»`,
+  bottlenecksShow: "Показать",
+  bottlenecksNewScenarioName: (title: string) => `Из узкого места: ${title}`,
+
+  // Heat-map (docs/tasks/T-25 п.1).
+  heatmapToggle: "Тепловая карта скорости (окно 5 мин)",
+  heatmapLegendFree: "Свободно",
+  heatmapLegendCongested: "Затор",
+  heatmapLegendNoData: "Нет данных",
+
+  // Delay sparkline + active count (docs/tasks/T-25 п.4).
+  sparklineTitle: "Задержка узких мест за 30 мин",
+  activeBottlenecksLabel: "Активных узких мест",
+
+  // Minimap (docs/tasks/T-25 п.5).
+  minimapTitle: "Мини-карта",
+
+  metersLabel: (m: number) => `${m} м`,
 } as const;

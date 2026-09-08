@@ -511,3 +511,348 @@ body {
   cursor: pointer;
   font-size: 12px;
 }
+
+/* --- Bottlenecks tab (T-25) --- */
+
+.bottlenecks-tab > * {
+  margin-bottom: 14px;
+}
+
+.bottlenecks-empty {
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+/* CSS2DRenderer's own root has pointer-events:none (scene/labels.ts) so it never steals map clicks;
+   the marker chip opts back in so it stays clickable. */
+.bottleneck-marker {
+  pointer-events: auto;
+  cursor: pointer;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--marker-color, #8a8d93);
+  color: #1a1a1a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+.bottleneck-marker.selected {
+  border-color: #3a7bd5;
+  box-shadow: 0 0 0 3px rgba(58, 123, 213, 0.5);
+}
+
+/* --- Delay sparkline + active count (T-25 п.4) --- */
+
+.bottleneck-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.bottleneck-summary-sparkline {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.bottleneck-summary-title {
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+.bottleneck-summary-sparkline canvas {
+  width: 100%;
+  height: 40px;
+  display: block;
+}
+
+.bottleneck-summary-count {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 64px;
+}
+
+.bottleneck-summary-count-value {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.bottleneck-summary-count-label {
+  font-size: 10px;
+  opacity: 0.75;
+  text-align: center;
+}
+
+/* --- Heat-map toggle + legend (T-25 п.1) --- */
+
+.heatmap-controls {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  padding-bottom: 10px;
+}
+
+.heatmap-legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  opacity: 0.85;
+  margin-top: 4px;
+}
+
+.heatmap-legend-track {
+  display: flex;
+  gap: 2px;
+}
+
+.heatmap-legend-swatch {
+  width: 16px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+/* --- Top-N table (T-25 п.2) --- */
+
+.bottlenecks-sort {
+  display: flex;
+  gap: 4px;
+}
+
+.sort-btn {
+  flex: 1 1 auto;
+  background: transparent;
+  color: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  padding: 5px 8px;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.sort-btn.active {
+  background: #3a7bd5;
+  border-color: #3a7bd5;
+}
+
+.bottleneck-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.bottleneck-row {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.bottleneck-row.selected {
+  background: rgba(58, 123, 213, 0.12);
+}
+
+.bottleneck-row-header {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 20px 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  color: inherit;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  padding: 7px 2px;
+}
+
+.bottleneck-rank {
+  font-weight: 700;
+  opacity: 0.8;
+}
+
+.bottleneck-title {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bottleneck-delay {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.los-badge {
+  font-size: 10px;
+  padding: 2px 5px;
+  border-radius: 3px;
+  white-space: nowrap;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.los-A,
+.los-B {
+  color: #8fd19e;
+}
+
+.los-C,
+.los-D {
+  color: #e0c23a;
+}
+
+.los-E,
+.los-F {
+  color: #e0806a;
+}
+
+.bottleneck-row-details {
+  padding: 4px 4px 12px 26px;
+}
+
+.bottleneck-metrics-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  font-size: 11px;
+  opacity: 0.9;
+  margin-bottom: 8px;
+}
+
+.bottleneck-section-title {
+  margin: 10px 0 6px;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.show-btn {
+  background: transparent;
+  color: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  padding: 3px 8px;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+/* --- Cause bar (T-25 п.2) --- */
+
+.cause-bar-track {
+  display: flex;
+  height: 10px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.cause-bar-segment {
+  height: 100%;
+}
+
+.cause-bar-remainder {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.cause-bar-legend {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+}
+
+.cause-bar-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  padding: 2px 0;
+}
+
+.cause-bar-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+
+.cause-bar-swatch-remainder {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.cause-bar-legend-label {
+  flex: 1 1 auto;
+}
+
+/* --- Recommendations (T-25 п.2) --- */
+
+.recommendation-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.recommendation-item {
+  padding: 6px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.recommendation-label {
+  display: block;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.recommendation-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.recommendation-actions button {
+  background: transparent;
+  color: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.recommendation-actions button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.recommendation-applied {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: #8fd19e;
+}
+
+/* --- Minimap (T-25 п.5) --- */
+
+.minimap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.minimap-title {
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+.minimap-canvas {
+  width: 100%;
+  aspect-ratio: 1;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  cursor: pointer;
+}
