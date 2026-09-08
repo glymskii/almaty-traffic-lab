@@ -27,3 +27,10 @@
 
 ## Заметки из ревью T-03 (учесть)
 - У `mergeRamp` конфликт задан только с крайней правой сквозной полосой; влияние слияния на соседние полосы идёт через MOBIL (T-10), не через коннектор.
+
+## Заметки от T-11 (учесть)
+- **`mergeRamp` не тронут, но уже работает.** У него `junctionRadiusM = 0`, конфликт слияния задан вручную
+  в билдере (`sThisM = lengthM`, `sOtherM = 0`, `this`/`other`), и `IntersectionRuntime` его читает:
+  уступающий съезд уже получает причину `yield_priority`.
+- **Для `merge_yield` (код 12)** нужно отличать манёвр `merge` в `conflictStopDistance` (`simulation.ts`):
+  сейчас там `left → gap_left_turn`, иначе `yield_priority`.

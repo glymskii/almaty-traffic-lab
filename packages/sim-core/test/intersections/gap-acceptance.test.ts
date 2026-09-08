@@ -3,7 +3,7 @@
  * hand-placed vehicle pool on the unsignalized T-junction, where the right of way of every crossing
  * is a plain `this`/`other` pair. The end-to-end behaviour lives in the nuance tests (N10-N12, N19).
  */
-import { defaultSimConfig } from "@atl/contracts";
+import { defaultSimConfig, type Network } from "@atl/contracts";
 import { describe, expect, it } from "vitest";
 import { IntersectionRuntime } from "../../src/runtime/intersections.ts";
 import { RuntimeNetwork } from "../../src/runtime/network.ts";
@@ -186,48 +186,65 @@ describe("a signalized crossing", () => {
   });
 });
 
-describe("no two vehicles on the same conflict point", () => {
-  it("holds over a busy signalized junction", () => {
-    const network = crossroads({ leftPocketM: 0, leftTurnMode: "permissive" });
-    const config = defaultSimConfig({
-      seed: 7,
-      demand: { tripsPerHourPeak: 2400, warmupMinutes: 1, vehicleBudget: 2000 },
-    });
-    const sim = createSimulation({ network, config });
-    const { runtime, pool, intersections } = kernelOf(sim);
-    const cf = intersections.conflicts;
-    const ZONE_M = 2;
+/**
+ * Acceptance criterion of T-11: over a whole run no crossing is ever covered from both sides at
+ * once. `sim` is stepped to `untilS` and every conflict point is checked on every step.
+ */
+function sharedPointEvents(network: Network, seed: number, tripsPerHourPeak: number): number {
+  const config = defaultSimConfig({
+    seed,
+    demand: { tripsPerHourPeak, warmupMinutes: 1, vehicleBudget: 2000 },
+  });
+  const sim = createSimulation({ network, config });
+  const { runtime, pool, intersections } = kernelOf(sim);
+  const cf = intersections.conflicts;
+  const ZONE_M = 2;
 
-    /** True while some vehicle of `track` covers coordinate `sPoint` on it. */
-    const covers = (track: number, sPoint: number): boolean => {
-      for (let i = pool.trackTail[track] as number; i >= 0; i = pool.ahead[i] as number) {
-        const s = pool.s[i] as number;
-        if (s >= sPoint - ZONE_M && s - (pool.length[i] as number) <= sPoint + ZONE_M) return true;
-      }
-      return false;
-    };
+  /** True while some vehicle of `track` covers coordinate `sPoint` on it. */
+  const covers = (track: number, sPoint: number): boolean => {
+    for (let i = pool.trackTail[track] as number; i >= 0; i = pool.ahead[i] as number) {
+      const s = pool.s[i] as number;
+      if (s >= sPoint - ZONE_M && s - (pool.length[i] as number) <= sPoint + ZONE_M) return true;
+    }
+    return false;
+  };
 
-    let shared = 0;
-    sim.runUntil(60);
-    while (sim.simTimeS < 420) {
-      sim.step();
-      for (let t = runtime.laneCount; t < runtime.trackCount; t++) {
-        if ((pool.trackTail[t] as number) < 0) continue;
-        const start = cf.conflictStart[t] as number;
-        const count = cf.conflictCount[t] as number;
-        for (let k = start; k < start + count; k++) {
-          const other = cf.conflictOther[k] as number;
-          if (other < t) continue; // each crossing is stored on both sides; check it once
-          if ((pool.trackTail[other] as number) < 0) continue;
-          if (
-            covers(t, cf.conflictSThis[k] as number) &&
-            covers(other, cf.conflictSOther[k] as number)
-          ) {
-            shared++;
-          }
+  let shared = 0;
+  sim.runUntil(60);
+  while (sim.simTimeS < 420) {
+    sim.step();
+    for (let t = runtime.laneCount; t < runtime.trackCount; t++) {
+      if ((pool.trackTail[t] as number) < 0) continue;
+      const start = cf.conflictStart[t] as number;
+      const count = cf.conflictCount[t] as number;
+      for (let k = start; k < start + count; k++) {
+        const other = cf.conflictOther[k] as number;
+        if (other < t) continue; // each crossing is stored on both sides; check it once
+        if ((pool.trackTail[other] as number) < 0) continue;
+        if (
+          covers(t, cf.conflictSThis[k] as number) &&
+          covers(other, cf.conflictSOther[k] as number)
+        ) {
+          shared++;
         }
       }
     }
-    expect(shared).toBe(0);
+  }
+  return shared;
+}
+
+describe("no two vehicles on the same conflict point", () => {
+  it("holds over a busy signalized junction", () => {
+    expect(
+      sharedPointEvents(crossroads({ leftPocketM: 0, leftTurnMode: "permissive" }), 7, 2400),
+    ).toBe(0);
+  }, 60000);
+
+  it("holds when a plan releases two conflicting movements it calls protected", () => {
+    // The signalized T-junction marks every movement `protected` while its plan gives the two main
+    // approaches one green (its `leftTurnModes` say `permissive`, so the left really does cross the
+    // opposing through). Right of way must still come from the conflict point alone: reading
+    // `Connector.protection` here would exempt both sides and drive them through each other.
+    expect(sharedPointEvents(tJunction({ signalized: true }), 12, 3000)).toBe(0);
   }, 60000);
 });

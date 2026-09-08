@@ -1,7 +1,7 @@
 import type { Network } from "@atl/contracts";
 import { SignalState } from "@atl/contracts";
 import { ConflictTable, PriorityCode } from "./conflicts.ts";
-import { NodeKindCode, ProtectionCode, type RuntimeNetwork } from "./network.ts";
+import { NodeKindCode, type RuntimeNetwork } from "./network.ts";
 import { TURN_COUNT, TurnCode } from "./turns.ts";
 import type { VehiclePool } from "./vehicles.ts";
 
@@ -148,11 +148,18 @@ export class IntersectionRuntime {
     );
   }
 
-  /** Whether movement `t` gives way to movement `other` at a point with this `priority`. */
+  /**
+   * Whether movement `t` gives way to movement `other` at a point with this `priority`.
+   *
+   * Right of way comes from the point alone, never from `Connector.protection` (docs/CONTRACTS.md,
+   * "Право проезда"). A protected movement normally ends up not yielding anywhere by itself --
+   * everything it crosses is held at red, so the `signal` branch below finds no threat -- and
+   * reading `protection` on top of that would only add a way to lose: where a plan does release two
+   * conflicting movements together, exempting them both makes them drive through each other, while
+   * the rank order below still lets exactly one of the two go.
+   */
   private yieldsAt(t: number, other: number, priority: number, groupState: Uint8Array): boolean {
     const rt = this.rt;
-    // A protected movement is released only when everything it crosses is red (T-08 guarantees it).
-    if ((rt.connProtection[t] as number) === ProtectionCode.protected) return false;
     if (priority === PriorityCode.this) return false;
     if (priority === PriorityCode.other) return true;
     // `signal`: the controller decides. Only a movement it is releasing right now can be a threat.
