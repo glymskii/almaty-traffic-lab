@@ -45,8 +45,8 @@ export const DEFAULT_LANES_PER_DIRECTION: Record<HighwayClass, number> = {
 /** Pocket opened where `turn:lanes` says the leftmost lane is left-only. */
 export const POCKET_TAGGED_LENGTH_M = 80;
 export const POCKET_TAGGED_MIN_LINK_M = 200;
-/** Short links: the pocket starts at this share of the link length instead. */
-export const POCKET_TAGGED_SHORT_START_SHARE = 0.4;
+/** Links shorter than that: the pocket takes this share of the link (continuous at 200 m: 0.4 · 200 = 80). */
+export const POCKET_TAGGED_SHORT_LENGTH_SHARE = 0.4;
 /** Pocket assumed on approaches to signalized nodes without `turn:lanes`. */
 export const POCKET_DEFAULT_LENGTH_M = 60;
 export const POCKET_DEFAULT_MIN_LINK_M = 120;
@@ -385,62 +385,86 @@ export function parseDirectionAttrs(
 }
 
 // ---------------------------------------------------------------------------
-// Lane objects for a link
+// Lane plan and lane objects for a link
 // ---------------------------------------------------------------------------
+
+export interface LanePlanInput {
+  dir: DirectionAttrs;
+  highwayClass: HighwayClass;
+  toNodeKind: NodeKind;
+  /** Centreline length; the pocket rules need it before the offset geometry exists. */
+  lengthM: number;
+}
+
+/** Decided before the geometry: the lane count sets the carriageway width and therefore the offset. */
+export interface LanePlan {
+  /** Turns per lane, leftmost first, including a pocket lane added by rule. */
+  turns: TurnKind[][];
+  turnsProvenance: Provenance;
+  /** Leftmost lane is a left-turn pocket; `byRule` when the generator added it (not in OSM). */
+  pocket?: { byRule: boolean };
+  /** = turns.length */
+  laneCount: number;
+  /** Index of the bus lane, -1 when none. */
+  busIndex: number;
+}
+
+/** Applies the turn defaults and both left-pocket rules; see README "Правила дефолтов". */
+export function planLanes(input: LanePlanInput): LanePlan {
+  const { dir, lengthM } = input;
+  const generalCount = dir.laneCount - (dir.busLane ? 1 : 0);
+  if (dir.turns !== undefined) {
+    const leftmost = dir.turns[0];
+    const pocket = dir.laneCount >= 2 && leftmost !== undefined && isLeftOnly(leftmost);
+    return {
+      turns: dir.turns,
+      turnsProvenance: "osm",
+      ...(pocket ? { pocket: { byRule: false } } : {}),
+      laneCount: dir.turns.length,
+      busIndex: dir.busLane ? dir.turns.length - 1 : -1,
+    };
+  }
+  const addPocket =
+    input.toNodeKind === "signalized" &&
+    generalCount >= POCKET_DEFAULT_MIN_LANES &&
+    POCKET_DEFAULT_CLASSES.has(input.highwayClass) &&
+    lengthM >= POCKET_DEFAULT_MIN_LINK_M;
+  const turns = defaultTurns(dir.laneCount, addPocket);
+  if (addPocket) turns.unshift(["left"]);
+  return {
+    turns,
+    turnsProvenance: "default",
+    ...(addPocket ? { pocket: { byRule: true } } : {}),
+    laneCount: turns.length,
+    busIndex: dir.busLane ? turns.length - 1 : -1,
+  };
+}
+
+/** Where a pocket opens: 80 m before the end (links ≥ 200 m), 40 % of the link otherwise; 60 m for rule pockets. */
+export function pocketStartS(lengthM: number, byRule: boolean): number {
+  if (byRule) return lengthM - POCKET_DEFAULT_LENGTH_M;
+  if (lengthM >= POCKET_TAGGED_MIN_LINK_M) return lengthM - POCKET_TAGGED_LENGTH_M;
+  return lengthM * (1 - POCKET_TAGGED_SHORT_LENGTH_SHARE);
+}
 
 export interface LaneBuildInput {
   linkId: string;
+  /** Final link length (offset geometry). */
   lengthM: number;
-  highwayClass: HighwayClass;
+  plan: LanePlan;
   dir: DirectionAttrs;
-  toNodeKind: NodeKind;
   assumptions: AssumptionCollector;
 }
 
-/**
- * Lanes of one link, leftmost first. Applies the turn defaults, the left-pocket rules and the bus-lane
- * rule, and records every default in the assumption collector.
- */
+/** Lane objects for one link, leftmost first, with provenance; records every default in the collector. */
 export function buildLanes(input: LaneBuildInput): Lane[] {
-  const { dir, lengthM, linkId } = input;
-  const generalCount = dir.laneCount - (dir.busLane ? 1 : 0);
-
-  let turns: TurnKind[][];
-  let turnsProvenance: Provenance;
-  let pocket: { startS: number; byRule: boolean } | undefined;
-  if (dir.turns !== undefined) {
-    turns = dir.turns;
-    turnsProvenance = "osm";
-    const leftmost = turns[0];
-    if (dir.laneCount >= 2 && leftmost !== undefined && isLeftOnly(leftmost)) {
-      const startS =
-        lengthM >= POCKET_TAGGED_MIN_LINK_M
-          ? lengthM - POCKET_TAGGED_LENGTH_M
-          : lengthM * POCKET_TAGGED_SHORT_START_SHARE;
-      pocket = { startS, byRule: false };
-    }
-  } else {
-    const addPocket =
-      input.toNodeKind === "signalized" &&
-      generalCount >= POCKET_DEFAULT_MIN_LANES &&
-      POCKET_DEFAULT_CLASSES.has(input.highwayClass) &&
-      lengthM >= POCKET_DEFAULT_MIN_LINK_M;
-    turns = defaultTurns(dir.laneCount, addPocket);
-    turnsProvenance = "default";
-    if (addPocket) {
-      turns = [["left"], ...turns];
-      pocket = { startS: lengthM - POCKET_DEFAULT_LENGTH_M, byRule: true };
-    }
-  }
-
-  const laneCount = turns.length;
-  const busIndex = dir.busLane ? laneCount - 1 : -1;
+  const { plan, dir, lengthM, linkId } = input;
   const lanes: Lane[] = [];
-  for (let i = 0; i < laneCount; i++) {
+  for (let i = 0; i < plan.laneCount; i++) {
     const id = `${linkId}:${i}`;
-    const isPocket = pocket !== undefined && i === 0;
-    const isBus = i === busIndex;
-    const provenance: ProvenanceMap = { turns: turnsProvenance };
+    const isPocket = plan.pocket !== undefined && i === 0;
+    const isBus = i === plan.busIndex;
+    const provenance: ProvenanceMap = { turns: plan.turnsProvenance };
     const lane: Lane = {
       id,
       linkId,
@@ -450,14 +474,17 @@ export function buildLanes(input: LaneBuildInput): Lane[] {
       endS: round(lengthM),
       kind: isPocket ? "turn_pocket" : isBus ? "bus" : "general",
       allowed: isBus ? [...PT_CLASSES] : [...ALL_CLASSES],
-      turns: [...(turns[i] ?? ["through"])],
+      turns: [...(plan.turns[i] ?? ["through"])],
       provenance,
     };
-    if (turnsProvenance === "default") input.assumptions.add("turns_default", id);
-    if (isPocket && pocket !== undefined) {
-      lane.startS = round(Math.max(0.1, pocket.startS), 1);
+    if (plan.turnsProvenance === "default") input.assumptions.add("turns_default", id);
+    if (isPocket && plan.pocket !== undefined) {
+      lane.startS = round(Math.max(0.1, pocketStartS(lengthM, plan.pocket.byRule)), 1);
       provenance.startS = "default";
-      input.assumptions.add(pocket.byRule ? "left_pocket_default" : "pocket_length_default", id);
+      input.assumptions.add(
+        plan.pocket.byRule ? "left_pocket_default" : "pocket_length_default",
+        id,
+      );
     }
     if (isBus) {
       lane.busLane = {
