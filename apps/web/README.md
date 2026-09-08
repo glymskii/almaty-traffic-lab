@@ -1,9 +1,9 @@
 # @atl/web
 
 Three.js-рендер полотна дорог и разметки по `Network` из `@atl/contracts`, инстансы машин/светофоров/
-пешеходов по `FrameBuffers` из `@atl/sim-worker`, плюс тонкая React-обвязка (верхний бар, атрибуция
-ODbL, состояние загрузки/прогрева). Сам ничего не считает про движение — только читает буферы кадров
-и метрики (`sim-core`/`sim-worker`).
+пешеходов по `FrameBuffers` из `@atl/sim-worker`, плюс React-оболочка (раскладка, управление временем,
+глобальные параметры, HUD, легенда допущений, тултип) поверх неё (T-23). Сам ничего не считает про
+движение — только читает буферы кадров и метрики (`sim-core`/`sim-worker`).
 
 ## Структура сцены
 
@@ -59,11 +59,60 @@ src/
                            повороты. Используется, когда скомпилированной сети нет
     loadNetwork.ts            fetch('/networks/<id>.network.json.gz') + DecompressionStream,
                            иначе demo-network.ts
-  Viewport.tsx                грузит сеть, монтирует сцену, запускает sim/client.ts (прогрев по
+  Viewport.tsx                грузит сеть (`networkId` из пропсов), монтирует сцену, запускает
+                           sim/client.ts с переданным `configPatch` (прогрев по
                            demand.warmupMinutes с прогресс-баром, затем play(1)) и на каждый
-                           тик rAF обновляет vehicles/signals/pedestrians (useEffect + cleanup)
-  App.tsx                      верхний бар (название, атрибуция ODbL) + <Viewport />
-  i18n/ru.ts                   все строки интерфейса
+                           тик rAF обновляет vehicles/signals/pedestrians (useEffect + cleanup).
+                           `ViewportHandle` (аргумент `onReady`) отдаёт `{ engine, rig, network,
+                           getSim, onSimReady }` — `onSimReady` стреляет один раз, когда прогрев
+                           закончился и `sim.play(1)` уже вызван (не раньше — воркер иначе
+                           отклонит `runUntil`), `getSim` — синхронный геттер той же ручки
+  sim/client.ts                 (T-23) `SimHandle` дополнен `setParams`/`requestReport`/`onMetrics`/
+                           `onReport`/`latestFrameMeta()` — тонкие проброс-обёртки над `SimClient`
+                           из `@atl/sim-worker`, плюс мутируемый снимок последнего кадра
+                           (rtFactor/vehicleCount/timeOfDayMin) для HUD
+  state/
+    store.ts                   стор на zustand (единственная новая прод-зависимость, п.1
+                           карточки). Хранит вкладку, выбор сети, параметры (runtime-safe —
+                           применяются через `sim.setParams` сразу; restart-required — только
+                           черновик до кнопки «Перезапустить»), состояние времени/скорости,
+                           HUD-метрики. `bindViewport` подписывается на `engine.onFrame` (fps,
+                           rtFactor, число машин, дисплейные часы) и на `sim.onReport`
+                           (периодический `requestReport`, т.к. воркер сам шлёт отчёт раз в
+                           `metrics.windowS`, а HUD хочет чаще); отписывается перед каждой
+                           новой подпиской. Restart = не «горячая» замена сима, а ремонт
+                           `<Viewport key={restartToken}>` из ui/App.tsx — проще и надёжнее,
+                           чем учить Viewport переинициализировать бегущий воркер
+    assumptions.ts              `computeAssumptionShares(network)` — доля provenance="default"
+                           по категориям прямо из загруженной сети (не из
+                           `data/networks/*.assumptions.json`, которого нет для демо-сети).
+                           Категории вроде "карман поворота" объединяют пары ключей
+                           `ASSUMPTION_KINDS` компилятора, которые на уровне сети неразличимы;
+                           merge/acceleration — self-referential (знаменатель = сама категория,
+                           а не все узлы/полосы), т.к. осмысленного "osm"-источника для них
+                           в компиляторе нет вовсе
+    format.ts                   formatClock/rtFactorLevel/roundKph/roundHours/formatFps/formatShare —
+                           чистые функции без Русских строк (юниты — в i18n/ru.ts)
+  ui/
+    App.tsx                     композиция: подписывается на стор, строит `configPatch`
+                           (useMemo) и монтирует `<Viewport key={restartToken}>` + панели
+    Layout.tsx                   раскладка: канвас на весь экран, поверх — боковая панель,
+                           HUD, тултип, атрибуция, время внизу (все — absolute/CSS, без
+                           сторонних UI-библиотек)
+    TimeBar.tsx                   play/pause, 1×/2×/5×/10×, часы, пресеты, «Перезапуск»,
+                           прогресс-бар прогрева
+    Hud.tsx                       машины/бюджет, rtFactor (жёлтый/красный), fps, средняя
+                           скорость и задержка за окно (из последнего `BottleneckReport`)
+    ParamsPanel.tsx                4 слайдера = `RUNTIME_SAFE_PARAM_PATHS` дословно (тест
+                           `store.test.ts` сверяет их с контрактом) + бюджет машин/такси в
+                           выделенке с пометкой «требует перезапуска»
+    OverviewTab.tsx                выбор сети, кнопки камеры (`rig.overview`/`rig.focus`),
+                           `<ParamsPanel/>`, легенда допущений
+    Tooltip.tsx                    рейкаст курсора на плоскость y=0, ближайший узел/линк в
+                           метрах (не меш-рейкаст: полотно дорог — общая геометрия без
+                           привязки атрибутов к id линка/узла, см. ARCHITECTURE.md)
+  i18n/ru.ts                   все строки интерфейса (единственное исключение — коды причин
+                           в `@atl/contracts/causes.ts`, там это часть контракта, не UI)
 scripts/copy-networks.mjs      data/networks/*.gz -> public/networks/ (predev/prebuild)
 ```
 
@@ -81,20 +130,27 @@ scripts/copy-networks.mjs      data/networks/*.gz -> public/networks/ (predev/pr
 1. Сгенерируй `data/networks/<bboxId>.network.json.gz` компилятором (`pnpm compile --bbox <id>`, T-02).
 2. `pnpm dev`/`pnpm build` сами копируют `data/networks/*.gz` в `apps/web/public/networks/`
    через `predev`/`prebuild` (`scripts/copy-networks.mjs`). Ничего вручную копировать не нужно.
-3. `loadNetwork(networkId = "small")` в `src/data/loadNetwork.ts` подставляет `bboxId` в URL.
+3. `loadNetwork(networkId)` в `src/data/loadNetwork.ts` подставляет `bboxId` в URL; переключатель
+   «Сеть» в OverviewTab берёт id из `NETWORK_IDS` (`state/store.ts`, `small`/`big` ->
+   `almaty-abay-small`/`almaty-center-big`) — таблица продублирована из
+   `packages/map-data/src/bboxes.ts`, а не импортирована оттуда: барель `@atl/map-data` тянет за
+   собой импортёр/компилятор на `node:fs`/`node:crypto`, что незачем тащить в браузерный бандл
+   ради двух строк-id (см. заметку ревью T-02 в карточке T-23 — там же был предложен этот вариант).
    Если файла нет (в т.ч. когда дев-сервер отвечает 200 с `index.html` вместо 404 — обычное
    поведение SPA-фолбэка) или сеть не прошла gzip-магию/`parseNetwork`, приложение показывает
-   встроенную демо-сеть из `src/data/demo-network.ts`, чтобы разработка не блокировалась на T-02.
+   встроенную демо-сеть из `src/data/demo-network.ts` (сейчас так для `big` — компилятор ещё не
+   прогонялся на большом полигоне), чтобы разработка не блокировалась на T-02.
 
 ## Команды
 
 ```bash
 pnpm --filter @atl/web dev      # то же, что pnpm dev из корня
 pnpm --filter @atl/web build    # то же, что pnpm build из корня
-pnpm --filter @atl/web test     # vitest, окружение node (без DOM)
+pnpm --filter @atl/web test     # vitest, окружение jsdom (T-23: смоук-тест TimeBar на @testing-library/react)
 ```
 
-## Вне объёма (T-13)
+## Вне объёма (T-23)
 
-Тепловая карта — T-25. Здания/парки/реки — T-27. UI-панели (HUD, редактор сценариев, A/B) —
-T-23/T-24/T-26.
+Содержимое вкладок «Узкие места»/«Сценарии»/«Сравнение» — заглушки со ссылкой на T-25/T-24/T-26
+соответственно (сама навигация между вкладками уже работает). Тепловая карта — T-25. Здания/парки/
+реки — T-27.

@@ -10,36 +10,22 @@ body {
   color: #1a1a1a;
 }
 
+/* T-23 shell: the canvas fills the screen; the side panel, HUD, tooltip and time bar float over it. */
 .app-shell {
-  display: flex;
+  position: relative;
   height: 100%;
-  flex-direction: column;
+  overflow: hidden;
 }
 
-.top-bar {
-  z-index: 1;
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 14px;
-  background: #1f2124;
-  color: #e8e6df;
-  font-size: 13px;
-}
-
-.top-bar-title {
-  font-weight: 600;
-}
-
-.top-bar-attribution {
-  opacity: 0.7;
+.canvas-layer {
+  position: absolute;
+  inset: 0;
 }
 
 .viewport {
   position: relative;
   min-height: 0;
-  flex: 1 1 auto;
+  height: 100%;
 }
 
 .viewport canvas {
@@ -66,4 +52,314 @@ body {
   text-shadow:
     0 0 3px rgba(255, 255, 255, 0.9),
     0 0 3px rgba(255, 255, 255, 0.9);
+}
+
+/* --- Side panel (T-23) --- */
+
+.side-panel {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 56px;
+  width: 300px;
+  max-width: 90vw;
+  overflow-y: auto;
+  background: rgba(31, 33, 36, 0.92);
+  color: #e8e6df;
+  font-size: 13px;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.25);
+}
+
+.side-panel-inner {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.side-panel-title {
+  padding: 10px 14px 0;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.tab-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.tab-btn {
+  flex: 1 1 auto;
+  padding: 6px 8px;
+  background: transparent;
+  color: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.tab-btn.active {
+  background: #3a7bd5;
+  border-color: #3a7bd5;
+}
+
+.tab-content {
+  padding: 12px 14px;
+  overflow-y: auto;
+}
+
+.tab-stub {
+  opacity: 0.75;
+}
+
+.overview-tab section {
+  margin-bottom: 16px;
+}
+
+.network-picker label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.camera-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.camera-buttons button,
+.tab-btn,
+.speed-btn,
+.preset-group button,
+.restart-btn,
+.time-bar-play,
+.apply-restart-btn {
+  font-family: inherit;
+}
+
+/* --- Global params (T-23) --- */
+
+.params-panel {
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  padding-top: 10px;
+}
+
+.param-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+
+.param-row input[type="range"] {
+  width: 100%;
+}
+
+.param-row-checkbox {
+  flex-direction: row;
+  align-items: center;
+}
+
+.restart-badge {
+  opacity: 0.7;
+  font-size: 11px;
+  font-style: normal;
+}
+
+.apply-restart-btn {
+  width: 100%;
+  padding: 6px;
+  background: #d58a3a;
+  color: #1a1a1a;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+/* --- Assumption legend (T-23) --- */
+
+.legend-intro {
+  opacity: 0.8;
+  font-size: 12px;
+}
+
+.legend-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.legend-item {
+  display: grid;
+  grid-template-columns: 1fr 2fr auto;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.legend-bar-track {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+  height: 6px;
+  overflow: hidden;
+}
+
+.legend-bar-fill {
+  background: #d5893a;
+  height: 100%;
+}
+
+/* --- Time bar (T-23) --- */
+
+.time-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 56px;
+  background: rgba(31, 33, 36, 0.92);
+  color: #e8e6df;
+  z-index: 2;
+}
+
+.time-bar-inner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 100%;
+  padding: 0 14px;
+  overflow-x: auto;
+}
+
+.time-bar-play,
+.restart-btn,
+.speed-btn,
+.preset-group button {
+  background: transparent;
+  color: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.speed-group,
+.preset-group {
+  display: flex;
+  gap: 4px;
+}
+
+.speed-btn.active {
+  background: #3a7bd5;
+  border-color: #3a7bd5;
+}
+
+.time-clock {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.warmup-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.warmup-bar-track {
+  width: 120px;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.warmup-bar-fill {
+  height: 100%;
+  background: #3a7bd5;
+}
+
+/* --- HUD (T-23) --- */
+
+.hud-layer {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+}
+
+.hud {
+  background: rgba(31, 33, 36, 0.85);
+  color: #e8e6df;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  min-width: 190px;
+}
+
+.hud-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 0;
+}
+
+.hud-rt-warn .hud-value {
+  color: #e0b23a;
+}
+
+.hud-rt-danger .hud-value {
+  color: #e05a3a;
+}
+
+/* --- Tooltip (T-23) --- */
+
+.tooltip {
+  position: fixed;
+  transform: translate(-50%, -120%);
+  background: rgba(255, 255, 255, 0.97);
+  color: #1a1a1a;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+  z-index: 3;
+  max-width: 240px;
+}
+
+.tooltip-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.tooltip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tooltip-row-label {
+  opacity: 0.65;
+}
+
+/* --- Attribution (T-23) --- */
+
+.attribution-corner {
+  position: absolute;
+  right: 10px;
+  bottom: 62px;
+  font-size: 11px;
+  color: #4a4d52;
+  background: rgba(255, 255, 255, 0.7);
+  padding: 2px 6px;
+  border-radius: 4px;
 }
