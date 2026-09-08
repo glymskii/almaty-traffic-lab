@@ -1,5 +1,6 @@
 import type { Network, SegmentDescriptor, VehicleClass } from "@atl/contracts";
 import { VEHICLE_CLASS_CODE, VEHICLE_CLASSES } from "@atl/contracts";
+import { TurnCode } from "./turns.ts";
 
 /** Number of vehicle classes; class codes come from VEHICLE_CLASS_CODE (car 0, bus 1, trolleybus 2, taxi 3). */
 export const CLASS_COUNT = VEHICLE_CLASSES.length;
@@ -126,6 +127,8 @@ export class RuntimeNetwork {
   readonly connFromLane: Int32Array;
   readonly connToLane: Int32Array;
   readonly connViaNode: Int32Array;
+  /** Movement the connector performs, see TurnCode (track-indexed; meaningless/0 for lanes). */
+  readonly connTurn: Uint8Array;
 
   // ---- polylines ----
   readonly polyCount: number;
@@ -360,6 +363,7 @@ export class RuntimeNetwork {
     this.connFromLane = new Int32Array(connectorCount);
     this.connToLane = new Int32Array(connectorCount);
     this.connViaNode = new Int32Array(connectorCount);
+    this.connTurn = new Uint8Array(trackCount);
     this.laneConnStart = new Int32Array(laneCount);
     this.laneConnCount = new Int32Array(laneCount);
     this.laneConnList = new Int32Array(connectorCount);
@@ -372,6 +376,7 @@ export class RuntimeNetwork {
       this.connToLane[c] = to;
       this.connViaNode[c] = mustIndex(this.nodeIndex, conn.viaNodeId, "node");
       const t = laneCount + c;
+      this.connTurn[t] = TurnCode[conn.turn];
       this.trackStartS[t] = 0;
       this.trackEndS[t] = conn.lengthM;
       this.trackSpeedMps[t] = Math.min(

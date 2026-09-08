@@ -13,6 +13,7 @@ import {
   SignalState,
   type SimConfig,
   type SimConfigPatch,
+  type TurnKind,
   VEHICLE_CLASS_BY_CODE,
   VEHICLE_CLASS_CODE,
   type VehicleClass,
@@ -21,11 +22,14 @@ import {
 } from "@atl/contracts";
 import { sampleDriverInto } from "./models/driver.ts";
 import { idmAcceleration, idmFreeAcceleration } from "./models/idm.ts";
+import { mandatoryBias, mobilIncentive, mobilSafe } from "./models/mobil.ts";
 import { Rng } from "./rng.ts";
 import { SimClock } from "./runtime/clock.ts";
+import { LaneRuntime } from "./runtime/lanes.ts";
 import { CLASS_COUNT, RuntimeNetwork } from "./runtime/network.ts";
 import { SignalRuntime } from "./runtime/signals.ts";
 import { TrajectoryHash } from "./runtime/trajectory-hash.ts";
+import { TURN_COUNT, TurnCode, turnBit } from "./runtime/turns.ts";
 import { VehiclePool } from "./runtime/vehicles.ts";
 
 /**
@@ -128,6 +132,15 @@ export interface SimulationKernel {
   readonly entryBlockedYellow: Uint8Array;
   /** Precomputed signal-group state machine (T-09); see `runtime/signals.ts`. */
   readonly signals: SignalRuntime;
+  /** Lane-level access rights and turn service (T-10); see `runtime/lanes.ts`. */
+  readonly lanes: LaneRuntime;
+  /**
+   * Forces the distribution of the next manoeuvre for vehicles entering `linkId`, replacing the
+   * uniform draw over the movements the link offers. Shares are relative weights over the movements
+   * that actually exist for the vehicle's class; a movement with weight 0 is never chosen. Stand-in
+   * for real route choice (T-12) and the way nuance tests dial turning demand up and down.
+   */
+  setTurnShares(linkId: string, shares: Partial<Record<TurnKind, number>>): void;
 }
 
 export function kernelOf(sim: Simulation): SimulationKernel {
@@ -142,6 +155,10 @@ export function kernelOf(sim: Simulation): SimulationKernel {
     entryBlockedCause: sim.entryBlockedCause,
     entryBlockedYellow: sim.entryBlockedYellow,
     signals: sim.signals,
+    lanes: sim.lanes,
+    setTurnShares: (linkId, shares) => {
+      sim.setTurnShares(linkId, shares);
+    },
   };
 }
 
@@ -178,6 +195,24 @@ const AUTO_DEMAND_FACTOR = 0.7;
 /** Fork labels of the master RNG, one per subsystem; fixed so later subsystems never shift earlier streams. */
 const RNG_FORK_SPAWN = 0;
 const RNG_FORK_DRIVERS = 1;
+const RNG_FORK_LANES = 2;
+
+const CAUSE_LANE_CHANGE_WAIT = causeCode("lane_change_wait");
+const CAUSE_POCKET_SPILLBACK = causeCode("pocket_spillback");
+
+/** Duration of a lane-change manoeuvre and, with it, the minimum interval between two changes, s. */
+const LANE_CHANGE_DURATION_S = 2;
+/**
+ * A vehicle that decelerates at least this hard while a mandatory lane change is pending but not
+ * feasible reports `lane_change_wait` instead of blaming the vehicle in front.
+ */
+const LANE_CHANGE_WAIT_DECEL_MPS2 = -0.5;
+/**
+ * A discretionary lane change is re-evaluated every this many steps (staggered by slot index, so the
+ * work spreads evenly): drivers do not reconsider their lane ten times a second, and a mandatory
+ * change is still evaluated on every step.
+ */
+const DISCRETIONARY_EVERY = 5;
 
 const CAR_CODE = VEHICLE_CLASS_CODE.car;
 const BUS_CODE = VEHICLE_CLASS_CODE.bus;
@@ -192,12 +227,29 @@ class SimulationImpl implements Simulation {
   readonly runtime: RuntimeNetwork;
   readonly pool: VehiclePool;
   readonly signals: SignalRuntime;
+  readonly lanes: LaneRuntime;
 
   private cfg: SimConfig;
   private readonly clock: SimClock;
   private readonly spawnRng: Rng;
   private readonly driverRng: Rng;
+  /** Turn intent at link entry and the bus-lane violator draw (T-10). */
+  private readonly laneRng: Rng;
   private readonly hash = new TrajectoryHash();
+
+  // ---- lane changes (T-10) ----
+  /** Lane each vehicle decided to move into this step, -1 = stay. Refilled every step. */
+  private readonly pendingLane: Int32Array;
+  /** New leader in the lane a vehicle decided to move into, as found in pass 1 (hint for pass 2). */
+  private readonly pendingLeader: Int32Array;
+  /** 1 while a mandatory lane change is pending but was not feasible this step. */
+  private readonly laneChangeBlocked: Uint8Array;
+  /** [link * TURN_COUNT + turn] -> relative weight of the movement, see setTurnShares. */
+  private readonly turnShares: Float64Array;
+  /** 1 for links with explicit shares; the rest draw uniformly over the movements they offer. */
+  private readonly turnSharesSet: Uint8Array;
+  /** Scratch weights for one draw; a member so that the hot path never allocates. */
+  private readonly turnWeights = new Float64Array(TURN_COUNT);
 
   /** Trips per hour at profile value 1.0 (explicit or auto-estimated at init). */
   readonly baseTripsPerHour: number;
@@ -240,10 +292,21 @@ class SimulationImpl implements Simulation {
       opts.config.dtS,
       opts.config.signals,
     );
+    this.lanes = new LaneRuntime(
+      opts.network,
+      this.runtime,
+      opts.config.behavior.taxisAllowedInBusLanes,
+    );
     this.clock = new SimClock(opts.config.dtS, opts.config.startTimeMin);
     const master = new Rng(opts.config.seed);
     this.spawnRng = master.fork(RNG_FORK_SPAWN);
     this.driverRng = master.fork(RNG_FORK_DRIVERS);
+    this.laneRng = master.fork(RNG_FORK_LANES);
+    this.pendingLane = new Int32Array(opts.config.demand.vehicleBudget).fill(-1);
+    this.pendingLeader = new Int32Array(opts.config.demand.vehicleBudget).fill(-1);
+    this.laneChangeBlocked = new Uint8Array(opts.config.demand.vehicleBudget);
+    this.turnShares = new Float64Array(this.runtime.linkCount * TURN_COUNT);
+    this.turnSharesSet = new Uint8Array(this.runtime.linkCount);
 
     const demand = opts.config.demand;
     this.baseTripsPerHour =
@@ -290,12 +353,14 @@ class SimulationImpl implements Simulation {
     const dt = this.clock.dtS;
     const now = this.clock.simTimeS;
     this.updateSignals(now); // 1
-    // 2-5 (pedestrians, routing, lane selection, lane changes): later tasks.
+    // 2-3 (pedestrians, routing): later tasks.
+    this.selectLanes(); // 4
+    this.changeLanes(now); // 5
     this.computeAccelerations(); // 6
     this.integrate(dt, now); // 7
     this.repairOrder();
     this.spawn(dt, now); // 8
-    this.updatePositions();
+    this.updatePositions(now);
     this.foldHash();
   }
 
@@ -347,6 +412,341 @@ class SimulationImpl implements Simulation {
     return requiredDecel <= comfortDecel * YELLOW_DILEMMA_FACTOR;
   }
 
+  // ---- lane choice and lane changes (T-10) ---------------------------------
+
+  /**
+   * Lane selection (ARCHITECTURE, step 4). Every vehicle on a lane records the lane it has to reach
+   * on the current link (`pool.targetLane`, -1 = the lane it is on already works): the nearest lane
+   * by index that serves its intended movement and admits its class. Three things produce a target:
+   * the movement is not available from this lane (turn lane, pocket), the lane does not admit the
+   * class any more (bus lane inside its hours), or the lane ends before the link does.
+   */
+  private selectLanes(): void {
+    const pool = this.pool;
+    const rt = this.runtime;
+    const lanes = this.lanes;
+    const tod = this.clock.timeOfDayMin;
+    const track = pool.track;
+    const n = pool.highWater;
+    for (let i = 0; i < n; i++) {
+      const t = track[i] as number;
+      if (t < 0) continue;
+      if (t >= rt.laneCount) {
+        pool.targetLane[i] = -1;
+        continue;
+      }
+      pool.targetLane[i] = lanes.targetLane(
+        t,
+        pool.cls[i] as number,
+        ((pool.persistentFlags[i] as number) & VehicleFlag.BUS_LANE_VIOLATOR) !== 0,
+        pool.intendedTurn[i] as number,
+        pool.s[i] as number,
+        tod,
+      );
+    }
+  }
+
+  /**
+   * Lane changes (ARCHITECTURE, step 5). Two passes so that every decision reads the same state:
+   *
+   *  1. per lane, walking its ordered list from the tail (increasing `s`) with a monotone cursor
+   *     into each neighbour list, so finding the new leader and the new follower is O(1) amortised;
+   *  2. in slot order, applying the decisions and re-checking the immediate gaps, because two
+   *     vehicles may have picked the same hole in the neighbour lane during pass 1.
+   */
+  private changeLanes(now: number): void {
+    const pool = this.pool;
+    const rt = this.runtime;
+    const pending = this.pendingLane;
+    const s = pool.s;
+    const ahead = pool.ahead;
+    for (let t = 0; t < rt.laneCount; t++) {
+      let i = pool.trackTail[t] as number;
+      if (i < 0) continue;
+      const left = rt.laneLeft[t] as number;
+      const right = rt.laneRight[t] as number;
+      let curLeft = left >= 0 ? (pool.trackTail[left] as number) : -1;
+      let curRight = right >= 0 ? (pool.trackTail[right] as number) : -1;
+      while (i >= 0) {
+        const si = s[i] as number;
+        while (curLeft >= 0 && (s[curLeft] as number) < si) curLeft = ahead[curLeft] as number;
+        while (curRight >= 0 && (s[curRight] as number) < si) curRight = ahead[curRight] as number;
+        pending[i] = this.decideLaneChange(i, t, left, curLeft, right, curRight, now);
+        i = ahead[i] as number;
+      }
+    }
+    const n = pool.highWater;
+    for (let i = 0; i < n; i++) {
+      const target = pending[i] as number;
+      if (target < 0) continue;
+      pending[i] = -1;
+      this.applyLaneChange(i, target, now);
+    }
+  }
+
+  /**
+   * MOBIL decision for vehicle `i` on lane `t`. A mandatory change (`targetLane >= 0`) looks only at
+   * the neighbour on the way to the target and adds `mandatoryBias`; a discretionary one looks at
+   * both neighbours, requires them to keep the intended movement reachable and takes the better of
+   * the two. Returns the lane to move into, or -1.
+   *
+   * The parts that do not depend on the candidate lane (own acceleration, the gain of the follower
+   * left behind) are computed once here. A vehicle that is alone on its stretch of lane can neither
+   * gain nor do anyone a favour, so it is skipped outright.
+   */
+  private decideLaneChange(
+    i: number,
+    t: number,
+    left: number,
+    curLeft: number,
+    right: number,
+    curRight: number,
+    now: number,
+  ): number {
+    const pool = this.pool;
+    this.laneChangeBlocked[i] = 0;
+    if ((pool.laneChangeEndS[i] as number) > now) return -1; // manoeuvre running / rate limit
+    const target = pool.targetLane[i] as number;
+    const oldLeader = pool.ahead[i] as number;
+    const oldFollower = pool.behind[i] as number;
+    if (target < 0 && oldLeader < 0 && oldFollower < 0) return -1;
+
+    const aOwnBefore = this.accelBehind(i, t, oldLeader);
+    const dOldFollower =
+      oldFollower < 0
+        ? 0
+        : this.accelBehind(oldFollower, t, oldLeader) - this.accelBehind(oldFollower, t, i);
+
+    if (target >= 0) {
+      const toRight =
+        (this.runtime.lanePos[target] as number) > (this.runtime.lanePos[t] as number);
+      const cand = toRight ? right : left;
+      const cur = toRight ? curRight : curLeft;
+      const distToEnd = (this.runtime.trackEndS[t] as number) - (pool.s[i] as number);
+      const bias = mandatoryBias(distToEnd, this.cfg.behavior.laneSelectionLookaheadM);
+      const gain = this.laneChangeGain(i, t, cand, cur, bias, false, aOwnBefore, dOldFollower);
+      if (gain > 0) {
+        this.pendingLeader[i] = cur;
+        return cand;
+      }
+      this.laneChangeBlocked[i] = 1;
+      return -1;
+    }
+    // A discretionary change is re-considered every DISCRETIONARY_EVERY steps, staggered by slot:
+    // drivers do not re-evaluate their lane 10 times a second, and this keeps the stage cheap.
+    if ((this.clock.stepIndex + i) % DISCRETIONARY_EVERY !== 0) return -1;
+    const gainLeft = this.laneChangeGain(i, t, left, curLeft, 0, true, aOwnBefore, dOldFollower);
+    const gainRight = this.laneChangeGain(i, t, right, curRight, 0, true, aOwnBefore, dOldFollower);
+    if (gainLeft <= 0 && gainRight <= 0) return -1;
+    if (gainRight > gainLeft) {
+      this.pendingLeader[i] = curRight;
+      return right;
+    }
+    this.pendingLeader[i] = curLeft;
+    return left;
+  }
+
+  /**
+   * Net MOBIL incentive of moving vehicle `i` from lane `t` into `cand`, m/s^2 above its threshold;
+   * -Infinity when the change is impossible (no such lane, no overlap at `s`, no access, no room) or
+   * unsafe. `newLeader` is the first vehicle of `cand` at or ahead of `i` (-1 when there is none).
+   */
+  private laneChangeGain(
+    i: number,
+    t: number,
+    cand: number,
+    newLeader: number,
+    bias: number,
+    keepTurn: boolean,
+    aOwnBefore: number,
+    dOldFollower: number,
+  ): number {
+    if (cand < 0) return Number.NEGATIVE_INFINITY;
+    const pool = this.pool;
+    const rt = this.runtime;
+    const lanes = this.lanes;
+    const si = pool.s[i] as number;
+    if (!rt.lanesOverlapAt(t, cand, si)) return Number.NEGATIVE_INFINITY;
+    const cls = pool.cls[i] as number;
+    const turn = pool.intendedTurn[i] as number;
+    const violator = ((pool.persistentFlags[i] as number) & VehicleFlag.BUS_LANE_VIOLATOR) !== 0;
+    if (!lanes.admitsAt(cand, cls, violator, turn, si, this.clock.timeOfDayMin))
+      return Number.NEGATIVE_INFINITY;
+    // A discretionary change must not throw away the movement the vehicle came for.
+    if (keepTurn && !lanes.serves(cand, cls, turn)) return Number.NEGATIVE_INFINITY;
+
+    const newFollower =
+      newLeader >= 0 ? (pool.behind[newLeader] as number) : (pool.trackHead[cand] as number);
+    if (this.gapTo(i, newLeader) <= 0) return Number.NEGATIVE_INFINITY;
+    if (this.gapTo(newFollower, i) <= 0) return Number.NEGATIVE_INFINITY;
+
+    const aNewFollowerBefore = this.accelBehind(newFollower, cand, newLeader);
+    const aNewFollowerAfter = this.accelBehind(newFollower, cand, i);
+    if (!mobilSafe(aNewFollowerAfter)) return Number.NEGATIVE_INFINITY;
+    const aOwnAfter = this.accelBehind(i, cand, newLeader);
+
+    // The old follower's gain does not depend on the candidate lane, so it arrives precomputed as
+    // a difference: pass it as (after, before) = (dOldFollower, 0).
+    const incentive = mobilIncentive(
+      aOwnAfter,
+      aOwnBefore,
+      dOldFollower,
+      0,
+      aNewFollowerAfter,
+      aNewFollowerBefore,
+      pool.politeness[i] as number,
+    );
+    return incentive + bias - (pool.laneChangeThreshold[i] as number);
+  }
+
+  /** Bumper-to-bumper gap between follower `f` and leader `l` on the same link, +Infinity if either is -1. */
+  private gapTo(f: number, l: number): number {
+    if (f < 0 || l < 0) return Number.POSITIVE_INFINITY;
+    const pool = this.pool;
+    return (pool.s[l] as number) - (pool.length[l] as number) - (pool.s[f] as number);
+  }
+
+  /** IDM acceleration of `f` on lane `lane` behind `l` (free road when `l` is -1); 0 when `f` is -1. */
+  private accelBehind(f: number, lane: number, l: number): number {
+    if (f < 0) return 0;
+    const pool = this.pool;
+    const v = pool.v[f] as number;
+    const v0 = (this.runtime.trackSpeedMps[lane] as number) * (pool.speedFactor[f] as number);
+    if (l < 0) return idmFreeAcceleration(v, v0, pool.maxAccel[f] as number);
+    return this.accelTowardObstacle(f, v, v0, this.gapTo(f, l), pool.v[l] as number);
+  }
+
+  /** Moves vehicle `i` into lane `target`, keeping `s` and the polyline segment cache. */
+  private applyLaneChange(i: number, target: number, now: number): void {
+    const pool = this.pool;
+    const rt = this.runtime;
+    const from = pool.track[i] as number;
+    if (from < 0 || from >= rt.laneCount) return; // left the network or entered a connector meanwhile
+    const si = pool.s[i] as number;
+    if (!rt.lanesOverlapAt(from, target, si)) return;
+    // Re-check against the vehicles that are in the target lane now: pass 1 read the old state and
+    // two vehicles may have aimed at the same hole.
+    const leader = this.refineLeader(target, si, this.pendingLeader[i] as number);
+    const follower =
+      leader >= 0 ? (pool.behind[leader] as number) : (pool.trackHead[target] as number);
+    if (this.gapTo(i, leader) <= 0) return;
+    if (this.gapTo(follower, i) <= 0) return;
+    if (!mobilSafe(this.accelBehind(follower, target, i))) return;
+
+    const v0 = (rt.trackSpeedMps[from] as number) * (pool.speedFactor[i] as number);
+    pool.freeFlowTimeS[i] =
+      (pool.freeFlowTimeS[i] as number) +
+      ((rt.trackEndS[target] as number) - (rt.trackEndS[from] as number)) / v0;
+    pool.laneChangeFromOffsetM[i] = rt.trackOffsetM[from] as number;
+    pool.laneChangeDir[i] = (rt.lanePos[target] as number) > (rt.lanePos[from] as number) ? 1 : -1;
+    pool.laneChangeEndS[i] = now + LANE_CHANGE_DURATION_S;
+    pool.remove(i);
+    pool.insert(target, i); // `s` and `geomSeg` are shared by every lane of the link
+    pool.nextTrack[i] = this.lanes.connectorFor(
+      target,
+      pool.cls[i] as number,
+      pool.intendedTurn[i] as number,
+    );
+    pool.targetLane[i] = this.lanes.targetLane(
+      target,
+      pool.cls[i] as number,
+      ((pool.persistentFlags[i] as number) & VehicleFlag.BUS_LANE_VIOLATOR) !== 0,
+      pool.intendedTurn[i] as number,
+      si,
+      this.clock.timeOfDayMin,
+    );
+  }
+
+  /**
+   * First vehicle of `lane` at or beyond `s` after the changes applied so far, starting from the
+   * candidate found in pass 1. Only vehicles inserted since then can shift the answer, so the walk
+   * is O(1) in practice.
+   */
+  private refineLeader(lane: number, s: number, hint: number): number {
+    const pool = this.pool;
+    let cur = hint;
+    if (cur < 0 || (pool.track[cur] as number) !== lane) {
+      if (cur >= 0) return this.leaderInLaneAt(lane, s); // the hint changed lanes itself
+      cur = pool.trackHead[lane] as number;
+    }
+    while (cur >= 0 && (pool.s[cur] as number) < s) cur = pool.ahead[cur] as number;
+    if (cur < 0) return -1;
+    let b = pool.behind[cur] as number;
+    while (b >= 0 && (pool.s[b] as number) >= s) {
+      cur = b;
+      b = pool.behind[cur] as number;
+    }
+    return cur;
+  }
+
+  /** First vehicle of `lane` at or beyond `s` (its leader would be the new one), -1 when there is none. */
+  private leaderInLaneAt(lane: number, s: number): number {
+    const pool = this.pool;
+    let cur = pool.trackTail[lane] as number;
+    while (cur >= 0 && (pool.s[cur] as number) < s) cur = pool.ahead[cur] as number;
+    return cur;
+  }
+
+  /**
+   * Draws the movement a vehicle of class `cls` intends to make at the end of the link owning `lane`.
+   * Uniform over the movements the link actually offers that class, unless `setTurnShares` gave the
+   * link explicit weights. Stand-in for route choice (T-12).
+   */
+  private sampleTurn(lane: number, cls: number): number {
+    const rt = this.runtime;
+    const link = rt.trackLink[lane] as number;
+    if (link < 0) return TurnCode.through;
+    const mask = this.lanes.linkTurnMaskByClass[link * CLASS_COUNT + cls] as number;
+    if (mask === 0) return TurnCode.through; // the link leaves the network: no manoeuvre to make
+    const explicit = this.turnSharesSet[link] === 1;
+    const base = link * TURN_COUNT;
+    const w = this.turnWeights;
+    let total = 0;
+    for (let k = 0; k < TURN_COUNT; k++) {
+      const available = (mask & turnBit(k)) !== 0;
+      const weight = available ? (explicit ? (this.turnShares[base + k] as number) : 1) : 0;
+      w[k] = weight;
+      total += weight;
+    }
+    if (total <= 0) {
+      // Explicit shares that exclude every movement this class has: fall back to a uniform draw.
+      for (let k = 0; k < TURN_COUNT; k++) {
+        const weight = (mask & turnBit(k)) !== 0 ? 1 : 0;
+        w[k] = weight;
+        total += weight;
+      }
+    }
+    let u = this.laneRng.float() * total;
+    for (let k = 0; k < TURN_COUNT; k++) {
+      u -= w[k] as number;
+      if (u < 0) return k;
+    }
+    return TurnCode.through;
+  }
+
+  /** Assigns the intended movement and the matching connector to a vehicle that just entered `lane`. */
+  private enterLink(i: number, lane: number): void {
+    const cls = this.pool.cls[i] as number;
+    const turn = this.sampleTurn(lane, cls);
+    this.pool.intendedTurn[i] = turn;
+    this.pool.nextTrack[i] = this.lanes.connectorFor(lane, cls, turn);
+  }
+
+  setTurnShares(linkId: string, shares: Partial<Record<TurnKind, number>>): void {
+    const link = this.runtime.linkIndex.get(linkId);
+    if (link === undefined) throw new Error(`setTurnShares: unknown link ${linkId}`);
+    const base = link * TURN_COUNT;
+    for (let k = 0; k < TURN_COUNT; k++) this.turnShares[base + k] = 0;
+    for (const [kind, share] of Object.entries(shares)) {
+      if (share === undefined) continue;
+      if (!(share >= 0)) throw new Error(`setTurnShares: share of ${kind} must be >= 0`);
+      const code = TurnCode[kind as TurnKind];
+      if (code === undefined) throw new Error(`setTurnShares: unknown turn ${kind}`);
+      this.turnShares[base + code] = share;
+    }
+    this.turnSharesSet[link] = 1;
+  }
+
   /**
    * Longitudinal model (ARCHITECTURE, step 6). Every vehicle starts from its free-road IDM
    * acceleration and then takes the minimum over its obstacles; the obstacle that wins becomes the
@@ -368,6 +768,7 @@ class SimulationImpl implements Simulation {
     const nextTrack = pool.nextTrack;
     const cause = pool.cause;
     const tail = pool.trackTail;
+    const lanes = this.lanes;
     const trackStart = rt.trackStartS;
     const trackEnd = rt.trackEndS;
     const trackSpeed = rt.trackSpeedMps;
@@ -420,6 +821,42 @@ class SimulationImpl implements Simulation {
         }
       }
 
+      // Obstacle: a full turn pocket the vehicle must enter (N09). It stops at the pocket's start
+      // in its current lane and blocks the through traffic behind it: cause `pocket_spillback`.
+      const target = pool.targetLane[i] as number;
+      if (target >= 0 && lanes.isPocket[target] === 1) {
+        const pocketStart = trackStart[target] as number;
+        if (si < pocketStart) {
+          const last = tail[target] as number;
+          const full =
+            last >= 0 &&
+            (s[last] as number) - (len[last] as number) < pocketStart + (pool.minGap[i] as number);
+          if (full) {
+            const aStop = this.accelTowardObstacle(i, vi, v0, pocketStart - si, 0);
+            if (aStop < acc) {
+              acc = aStop;
+              if (aFree - aStop >= LEADER_BINDING_MPS2) c = CAUSE_POCKET_SPILLBACK;
+            }
+          }
+        }
+      }
+
+      // Obstacle: the lane ends without a permitted continuation while a mandatory lane change is
+      // still pending. Without this the vehicle would run off the end and be dropped; with it, it
+      // queues at the end of the lane and keeps trying to merge.
+      if (
+        (nextTrack[i] as number) < 0 &&
+        t < rt.laneCount &&
+        rt.trackIsExit[t] === 0 &&
+        target >= 0
+      ) {
+        const aStop = this.accelTowardObstacle(i, vi, v0, (trackEnd[t] as number) - si, 0);
+        if (aStop < acc) {
+          acc = aStop;
+          if (aFree - aStop >= LEADER_BINDING_MPS2) c = CAUSE_LANE_CHANGE_WAIT;
+        }
+      }
+
       // Obstacle: stop line at the end of this track while entering the next track is blocked.
       const next = nextTrack[i] as number;
       if (next >= 0) {
@@ -436,6 +873,16 @@ class SimulationImpl implements Simulation {
             if (aFree - aStop >= LEADER_BINDING_MPS2) c = blocked;
           }
         }
+      }
+
+      // A vehicle that has to brake for a mandatory change it could not make blames the change,
+      // not the vehicle in front of it (the leader is only the messenger).
+      if (
+        this.laneChangeBlocked[i] === 1 &&
+        acc < LANE_CHANGE_WAIT_DECEL_MPS2 &&
+        (c === CAUSE_LEADER || c === CAUSE_FREE_FLOW || c === CAUSE_SPEED_LIMIT)
+      ) {
+        c = CAUSE_LANE_CHANGE_WAIT;
       }
 
       a[i] = acc;
@@ -492,6 +939,12 @@ class SimulationImpl implements Simulation {
       let fl = 0;
       if (ai < BRAKING_MPS2) fl |= VehicleFlag.BRAKING;
       if (vNew <= stoppedV) fl |= VehicleFlag.STOPPED;
+      if ((pool.laneChangeEndS[i] as number) > now) {
+        fl |=
+          (pool.laneChangeDir[i] as number) < 0
+            ? VehicleFlag.BLINKER_LEFT
+            : VehicleFlag.BLINKER_RIGHT;
+      }
       if (sNew >= (trackEnd[t] as number)) {
         if (!this.advanceTrack(i, sNew, now)) continue; // left the network
       } else {
@@ -524,7 +977,15 @@ class SimulationImpl implements Simulation {
       if (last && sPos >= end) sPos = end - 0.001; // pathological chain of tiny tracks: finish next step
       pool.s[i] = sPos;
       pool.geomSeg[i] = 0;
-      pool.nextTrack[i] = rt.trackNextByClass[t * CLASS_COUNT + (pool.cls[i] as number)] as number;
+      pool.laneChangeEndS[i] = 0;
+      pool.laneChangeDir[i] = 0;
+      pool.targetLane[i] = -1;
+      this.laneChangeBlocked[i] = 0;
+      if (t < rt.laneCount) this.enterLink(i, t);
+      else
+        pool.nextTrack[i] = rt.trackNextByClass[
+          t * CLASS_COUNT + (pool.cls[i] as number)
+        ] as number;
       pool.freeFlowTimeS[i] =
         (pool.freeFlowTimeS[i] as number) +
         (end - (rt.trackStartS[t] as number)) /
@@ -698,9 +1159,20 @@ class SimulationImpl implements Simulation {
     pool.s[i] = sSpawn;
     pool.v[i] = vEntry;
     pool.a[i] = 0;
-    pool.nextTrack[i] = rt.trackNextByClass[lane * CLASS_COUNT + (pool.cls[i] as number)] as number;
     pool.geomSeg[i] = 0;
-    pool.persistentFlags[i] = 0;
+    // Cars and taxis that ignore bus lanes are drawn once, at spawn (behavior.busLaneViolatorShare).
+    pool.persistentFlags[i] =
+      (cls === "car" || cls === "taxi") &&
+      this.laneRng.chance(this.cfg.behavior.busLaneViolatorShare)
+        ? VehicleFlag.BUS_LANE_VIOLATOR
+        : 0;
+    pool.targetLane[i] = -1;
+    pool.laneChangeEndS[i] = 0;
+    pool.laneChangeDir[i] = 0;
+    pool.laneChangeFromOffsetM[i] = rt.trackOffsetM[lane] as number;
+    this.pendingLane[i] = -1;
+    this.laneChangeBlocked[i] = 0;
+    this.enterLink(i, lane);
     pool.flags[i] = vEntry <= this.cfg.metrics.stoppedSpeedMps ? VehicleFlag.STOPPED : 0;
     pool.cause[i] = CAUSE_FREE_FLOW;
     pool.rootCause[i] = CAUSE_FREE_FLOW;
@@ -715,7 +1187,7 @@ class SimulationImpl implements Simulation {
   }
 
   /** World position and heading of every vehicle from its track polyline and lateral offset. */
-  private updatePositions(): void {
+  private updatePositions(now: number): void {
     const pool = this.pool;
     const rt = this.runtime;
     const track = pool.track;
@@ -733,7 +1205,15 @@ class SimulationImpl implements Simulation {
       const along = d - (rt.pcum[k] as number);
       const ux = rt.segUx[k] as number;
       const uy = rt.segUy[k] as number;
-      const off = rt.trackOffsetM[t] as number;
+      let off = rt.trackOffsetM[t] as number;
+      // Lane change in progress: slide the lateral offset over LANE_CHANGE_DURATION_S so the
+      // renderer sees a continuous manoeuvre even though the vehicle switched lists at once.
+      const lcEnd = pool.laneChangeEndS[i] as number;
+      if (lcEnd > now && t < rt.laneCount) {
+        const from = pool.laneChangeFromOffsetM[i] as number;
+        const progress = 1 - (lcEnd - now) / LANE_CHANGE_DURATION_S;
+        off = from + (off - from) * progress;
+      }
       pool.x[i] = (rt.px[k] as number) + ux * along + uy * off;
       pool.y[i] = (rt.py[k] as number) + uy * along - ux * off;
       pool.heading[i] = rt.segAngle[k] as number;

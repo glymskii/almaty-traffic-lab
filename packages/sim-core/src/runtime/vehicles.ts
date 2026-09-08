@@ -33,6 +33,21 @@ export class VehiclePool {
   /** Cached polyline segment for position lookup (relative to the track's polyline). */
   readonly geomSeg: Int32Array;
 
+  // ---- lane choice (T-10) ----
+  /**
+   * Movement the vehicle intends to make at the end of the current link (TurnCode). Drawn when it
+   * enters the link and kept until it enters the next one; a lane change preserves it.
+   */
+  readonly intendedTurn: Uint8Array;
+  /** Lane the vehicle must reach on this link before the end of its current lane, -1 = none. */
+  readonly targetLane: Int32Array;
+  /** Simulation time at which the current lane-change manoeuvre ends; also the rate limit. */
+  readonly laneChangeEndS: Float64Array;
+  /** Lateral offset of the lane the vehicle came from, for interpolation during the manoeuvre. */
+  readonly laneChangeFromOffsetM: Float32Array;
+  /** -1 = changing to the left, +1 = to the right, 0 = not changing. */
+  readonly laneChangeDir: Int8Array;
+
   // ---- vehicle and driver ----
   readonly cls: Uint8Array;
   readonly length: Float32Array;
@@ -91,6 +106,11 @@ export class VehiclePool {
     this.y = new Float64Array(capacity);
     this.heading = new Float64Array(capacity);
     this.geomSeg = new Int32Array(capacity);
+    this.intendedTurn = new Uint8Array(capacity);
+    this.targetLane = new Int32Array(capacity).fill(-1);
+    this.laneChangeEndS = new Float64Array(capacity);
+    this.laneChangeFromOffsetM = new Float32Array(capacity);
+    this.laneChangeDir = new Int8Array(capacity);
     this.cls = new Uint8Array(capacity);
     this.length = new Float32Array(capacity);
     this.speedFactor = new Float32Array(capacity);

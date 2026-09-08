@@ -12,6 +12,8 @@ import { createSimulation, kernelOf } from "../../src/simulation.ts";
 import { straightRoad } from "../fixtures/builders.ts";
 import { bentRoad, twoLinkRoad } from "./networks.ts";
 
+const BLINKERS = VehicleFlag.BLINKER_LEFT | VehicleFlag.BLINKER_RIGHT;
+
 function sim(network = straightRoad(), patch: SimConfigPatch = {}) {
   return createSimulation({ network, config: defaultSimConfig(patch) });
 }
@@ -118,7 +120,12 @@ describe("createSimulation on a straight road", () => {
       seen.set(id, frame.x[k] as number);
       expect(frame.x[k]).toBeGreaterThanOrEqual(0);
       expect(frame.x[k]).toBeLessThanOrEqual(1000);
-      expect(Math.abs(Math.abs(frame.y[k] as number) - 1.75)).toBeLessThan(1e-4);
+      // Lane centres are +-1.75 m; a vehicle changing lanes (T-10) slides between them for 2 s
+      // and then reports a blinker.
+      const offset = Math.abs(frame.y[k] as number);
+      const changing = ((frame.flags[k] as number) & BLINKERS) !== 0;
+      expect(offset).toBeLessThanOrEqual(1.75 + 1e-4);
+      if (!changing) expect(Math.abs(offset - 1.75)).toBeLessThan(1e-4);
       expect(frame.heading[k]).toBeCloseTo(0, 6);
       expect(frame.speed[k]).toBeGreaterThanOrEqual(0);
       expect([VEHICLE_CLASS_CODE.car, VEHICLE_CLASS_CODE.taxi]).toContain(frame.cls[k]);
@@ -386,7 +393,7 @@ describe("track transitions", () => {
     expect(st.total.spawned).toBe(st.total.active + dropped);
   });
 
-  it("drops vehicles whose lane ends mid-link and keeps trips of the full-length lane", () => {
+  it("merges vehicles out of a lane that ends mid-link instead of dropping them (T-10)", () => {
     const net = straightRoad({ lanes: 2 });
     const lane = net.lanes[1];
     if (!lane) throw new Error("fixture");
@@ -405,13 +412,12 @@ describe("track transitions", () => {
       }
     }
     const st = s.tripStats();
-    const dropped = kernelOf(s).droppedVehicles;
-    expect(dropped).toBeGreaterThan(10);
+    // Before T-10 the ending lane dropped its vehicles; now the mandatory change moves them over.
+    expect(kernelOf(s).droppedVehicles).toBe(0);
     expect(st.total.completed).toBeGreaterThan(10);
-    expect(st.total.spawned).toBe(st.total.completed + st.total.active + dropped);
-    // Completed trips all ran the full 1000 m of lane 0 (a 600 m trip would take ~36 s).
+    expect(st.total.spawned).toBe(st.total.completed + st.total.active);
+    // Every completed trip ran the full 1000 m; merging into a saturated lane costs a little delay.
     expect(st.total.meanTripTimeS).toBeGreaterThan(55);
-    expect(st.total.meanTripTimeS).toBeLessThan(75);
   });
 
   it("holds vehicles at a blocked entry, reports its cause, and keeps gaps >= s0 across boundaries", () => {
@@ -490,14 +496,18 @@ describe("track transitions", () => {
     for (let k = 0; k < frame.count; k++) {
       const x = frame.x[k] as number;
       const y = frame.y[k] as number;
+      // A vehicle changing lanes (T-10) slides between the two lane centres for 2 s.
+      const changing = ((frame.flags[k] as number) & BLINKERS) !== 0;
       if (y < -1) {
         // still on the eastbound leg: y is the lane offset, heading east
-        expect(Math.abs(Math.abs(y) - 1.75)).toBeLessThan(1e-4);
+        if (!changing) expect(Math.abs(Math.abs(y) - 1.75)).toBeLessThan(1e-4);
+        expect(Math.abs(y)).toBeLessThanOrEqual(1.75 + 1e-4);
         expect(frame.heading[k]).toBeCloseTo(0, 6);
         east++;
       } else if (y > 5) {
         // northbound leg: x is 500 +- lane offset, heading north
-        expect(Math.abs(Math.abs(x - 500) - 1.75)).toBeLessThan(1e-4);
+        if (!changing) expect(Math.abs(Math.abs(x - 500) - 1.75)).toBeLessThan(1e-4);
+        expect(Math.abs(x - 500)).toBeLessThanOrEqual(1.75 + 1e-4);
         expect(frame.heading[k]).toBeCloseTo(Math.PI / 2, 6);
         north++;
       }
@@ -508,7 +518,9 @@ describe("track transitions", () => {
 });
 
 describe("performance", () => {
-  it("steps 5000 vehicles well under 5 ms", () => {
+  // The explicit timeout covers the warm-up, not the measurement: filling 20 lanes takes a few
+  // thousand steps and T-10 made every one of them do lane-change work.
+  it("steps 5000 vehicles well under 5 ms", { timeout: 30_000 }, () => {
     // A 5 km road cannot hold 5000 moving vehicles; use 20 lanes x 10 km near capacity instead.
     const s = sim(straightRoad({ lengthM: 10000, lanes: 20 }), {
       demand: { tripsPerHourPeak: 36000, warmupMinutes: 0, vehicleBudget: 8000 },

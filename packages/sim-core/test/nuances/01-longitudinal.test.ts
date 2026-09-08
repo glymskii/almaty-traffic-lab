@@ -5,7 +5,7 @@
 import { allocateFrameBuffers, defaultSimConfig, type SimConfigPatch } from "@atl/contracts";
 import { describe, expect, it } from "vitest";
 import { createSimulation } from "../../src/simulation.ts";
-import { straightRoad } from "../fixtures/builders.ts";
+import { saturationMultiplier, straightRoad } from "../fixtures/builders.ts";
 
 const WARMUP_MIN = 3;
 const RUN_MIN = 10;
@@ -71,7 +71,22 @@ describe("N01 speed limit", () => {
 });
 
 describe("N02 lane count", () => {
-  it.todo("at saturation demand a 3-lane road passes ~1.5x the flow of a 2-lane road (±15%)");
+  /** Completed trips over the measurement window at ~1.2x the capacity of the entry lanes. */
+  function saturatedFlow(lanes: number): number {
+    const network = straightRoad({ lanes });
+    const sim = run(network, {
+      demand: { multiplier: saturationMultiplier(network), vehicleBudget: 4000 },
+    });
+    const completed = sim.tripStats().total.completed;
+    expect(completed).toBeGreaterThan(100);
+    return completed;
+  }
+
+  it("at saturation demand a 3-lane road passes ~1.5x the flow of a 2-lane road (±15%)", () => {
+    const ratio = saturatedFlow(3) / saturatedFlow(2);
+    expect(ratio).toBeGreaterThan(1.5 * 0.85);
+    expect(ratio).toBeLessThan(1.5 * 1.15);
+  });
 });
 
 describe("N03 driver heterogeneity", () => {
