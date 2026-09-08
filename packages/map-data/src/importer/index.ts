@@ -14,7 +14,12 @@ export interface OsmElement {
   tags?: Record<string, string>;
   nodes?: number[];
   /** Relation members; with `out geom` (buildings/landuse layers) each member carries its own geometry. */
-  members?: { type: string; ref: number; role: string; geometry?: { lat: number; lon: number }[] }[];
+  members?: {
+    type: string;
+    ref: number;
+    role: string;
+    geometry?: { lat: number; lon: number }[];
+  }[];
   /** Present for `out center` queries (pois layer): centroid of a way or relation. */
   center?: { lat: number; lon: number };
   geometry?: { lat: number; lon: number }[];
