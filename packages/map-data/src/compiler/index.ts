@@ -17,6 +17,7 @@ import {
   computeStats,
   createAssumptionCollector,
 } from "./assumptions.ts";
+import { runCity } from "./city.ts";
 import { runIntersections } from "./intersections.ts";
 import { buildLinks, type LinkLevel, type WayLinks } from "./links.ts";
 import { buildOsmGraph } from "./osm-graph.ts";
@@ -33,6 +34,8 @@ const signalsStage = LATER_STAGES.find((s) => s.name === "signals");
 if (signalsStage !== undefined) signalsStage.run = runSignals;
 const transitStage = LATER_STAGES.find((s) => s.name === "transit");
 if (transitStage !== undefined) transitStage.run = runTransit;
+const cityStage = LATER_STAGES.find((s) => s.name === "city");
+if (cityStage !== undefined) cityStage.run = runCity;
 
 export interface CompileOptions {
   bbox: BBoxPreset;
@@ -60,6 +63,12 @@ export interface CompileReport {
 export type { AssumptionEntry, AssumptionKind, CompileStats } from "./assumptions.ts";
 export { ASSUMPTION_KINDS } from "./assumptions.ts";
 export { ATTRACTOR_SEARCH_M, DEAD_END_WEIGHT } from "./attractors.ts";
+export {
+  BUILDING_HEIGHT_PER_LEVEL_M,
+  BUILDING_TYPE_HEIGHT_M,
+  DEFAULT_BUILDING_HEIGHT_M,
+  DEFAULT_WATERWAY_WIDTH_M,
+} from "./city.ts";
 export { RULE_CONFLICT_NEAR_M } from "./conflicts.ts";
 export { connectorId } from "./connectors.ts";
 export { CROSSING_ATTACH_M } from "./crosswalks.ts";
