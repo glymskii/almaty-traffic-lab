@@ -16,12 +16,17 @@ import {
   computeStats,
   createAssumptionCollector,
 } from "./assumptions.ts";
+import { runIntersections } from "./intersections.ts";
 import { buildLinks, type LinkLevel, type WayLinks } from "./links.ts";
 import { buildOsmGraph } from "./osm-graph.ts";
-import { type CompileContext, runLaterStages } from "./stages.ts";
+import { type CompileContext, LATER_STAGES, runLaterStages } from "./stages.ts";
 import { buildTopology } from "./topology.ts";
 
 export const GENERATOR = "@atl/map-data compiler 0.0.1";
+
+/** Stage registry wiring: `stages.ts` stays free of runtime imports of the stage modules. */
+const intersectionsStage = LATER_STAGES.find((s) => s.name === "intersections");
+if (intersectionsStage !== undefined) intersectionsStage.run = runIntersections;
 
 export interface CompileOptions {
   bbox: BBoxPreset;
@@ -48,6 +53,12 @@ export interface CompileReport {
 
 export type { AssumptionEntry, AssumptionKind, CompileStats } from "./assumptions.ts";
 export { ASSUMPTION_KINDS } from "./assumptions.ts";
+export { ATTRACTOR_SEARCH_M, DEAD_END_WEIGHT } from "./attractors.ts";
+export { RULE_CONFLICT_NEAR_M } from "./conflicts.ts";
+export { connectorId } from "./connectors.ts";
+export { CROSSING_ATTACH_M } from "./crosswalks.ts";
+export { APPROACH_FROM_RU, approachCompassIndex, describeApproach } from "./describe.ts";
+export { GATE_CLASS_WEIGHT, GATE_MIN_LINK_M } from "./gates.ts";
 export {
   DEFAULT_LANES_PER_DIRECTION,
   defaultTurns,
@@ -55,6 +66,9 @@ export {
   parseTurnLanes,
 } from "./lanes.ts";
 export type { LinkLevel, WayLinks } from "./links.ts";
+export { ACCELERATION_LANE_M, MERGE_MAX_ANGLE_DEG } from "./merges.ts";
+export type { Approach, Arm, Exit, NodeMovements } from "./movements.ts";
+export { buildNodeMovements } from "./movements.ts";
 export { DEFAULT_SPEED_KPH, parseMaxspeed } from "./speeds.ts";
 export type { CompileContext, CompileStage } from "./stages.ts";
 export { LATER_STAGES } from "./stages.ts";

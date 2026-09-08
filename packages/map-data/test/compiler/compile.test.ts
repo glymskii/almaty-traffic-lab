@@ -34,7 +34,10 @@ describe("compileNetwork on the mini fixture", () => {
     expect(net.meta.generatedAt).toBe(FIXED_TIME);
     expect(net.meta.sourceHash).toMatch(/^[0-9a-f]{64}$/);
     expect(net.meta.osmSnapshotAt).toBe("2026-08-31T12:00:00Z");
-    expect(net.connectors).toEqual([]);
+    // Movements, zebras, gates and attractors come from the intersections stage (T-07).
+    expect(net.connectors.length).toBeGreaterThan(0);
+    expect(net.crosswalks.length).toBeGreaterThan(0);
+    expect(net.gates).toHaveLength(5);
   });
 
   it("creates the expected nodes: junction, dead end and five gates", () => {
@@ -212,7 +215,7 @@ describe("compileNetwork on the mini fixture", () => {
     });
     // Only the "stage not implemented" notices; the footway and the service road are ignored silently.
     expect(report.warnings.filter((w) => !w.includes("not implemented"))).toEqual([]);
-    expect(report.warnings).toHaveLength(5);
+    expect(report.warnings).toHaveLength(4);
     expect(report.linkLevels).toEqual({});
   });
 
