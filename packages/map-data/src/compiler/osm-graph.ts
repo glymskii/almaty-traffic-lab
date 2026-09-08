@@ -48,6 +48,8 @@ export interface OsmGraph {
   signalKeys: Set<string>;
   /** Tags of every OSM node present as an element (for later stages: crossings, stops). */
   nodeTags: Map<number, Tags>;
+  /** Local metric position of every tagged OSM node (T-07 places zebras from `highway=crossing`). */
+  nodePoints: Map<number, Point2>;
   /** The bbox in local metres. */
   rect: Rect;
 }
@@ -203,7 +205,12 @@ export function buildOsmGraph(
       if (nodeTags.get(v.osmNodeId)?.highway === "traffic_signals") signalKeys.add(v.key);
     }
   }
-  return { pieces, gateKeys, signalKeys, nodeTags, rect };
+  const nodePoints = new Map<number, Point2>();
+  for (const id of nodeTags.keys()) {
+    const p = coords.get(id);
+    if (p !== undefined) nodePoints.set(id, p);
+  }
+  return { pieces, gateKeys, signalKeys, nodeTags, nodePoints, rect };
 }
 
 /** Splits a way into the parts inside the rectangle; each boundary crossing yields a gate vertex. */

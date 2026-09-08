@@ -1,16 +1,16 @@
 {
   "networkId": "almaty-abay-small",
   "bboxId": "almaty-abay-small",
-  "generatedAt": "2026-09-08T06:29:07.913Z",
+  "generatedAt": "2026-09-08T07:35:07.841Z",
   "sourceHash": "d5fc7e09aa103f3b6b5bd85d1b21c71d6f03c0b3c7e76f3a1e5b3ce0377b16ef",
   "stats": {
     "nodes": 444,
     "links": 896,
     "lanes": 1675,
     "nodesByKind": {
-      "junction": 209,
+      "junction": 208,
       "signalized": 70,
-      "merge": 0,
+      "merge": 1,
       "gate": 56,
       "dead_end": 36,
       "bend": 73
@@ -57,6 +57,31 @@
       "kind": "bus_lane_position_assumed",
       "count": 1,
       "example": "w692910574_0_f:3"
+    },
+    {
+      "kind": "merge_node_default",
+      "count": 1,
+      "example": "n4315331683"
+    },
+    {
+      "kind": "connector_priority_default",
+      "count": 1527,
+      "example": "w1010536935_0_f:0>w1010536935_1_f:0"
+    },
+    {
+      "kind": "crosswalk_default",
+      "count": 590,
+      "example": "n1020210743.x0"
+    },
+    {
+      "kind": "gate_weight_default",
+      "count": 56,
+      "example": "ng1010536935_0.gate"
+    },
+    {
+      "kind": "attractor_weight_default",
+      "count": 145,
+      "example": "poi.n1508723547"
     }
   ],
   "warnings": [
@@ -92,7 +117,9 @@
     "way 1458313378: the only lane forward is a bus lane; adding a general lane (default)",
     "way 1522660681: lanes=2 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
     "way 1533842999: turn:lanes has 3 entries but the forward direction has 2 lanes; turn:lanes ignored",
-    "stage \"intersections\" (T-07) is not implemented yet; skipped",
+    "node ng1236469258_0: gate only 0.24 m from a junction; weights set to 0 (no traffic is born or removed here)",
+    "node ng1236469259_0: gate only 0.41 m from a junction; weights set to 0 (no traffic is born or removed here)",
+    "node ng1349705503_0: gate only 4.4 m from a junction; weights set to 0 (no traffic is born or removed here)",
     "stage \"signals\" (T-08) is not implemented yet; skipped",
     "stage \"transit\" (T-17) is not implemented yet; skipped",
     "stage \"city\" (T-27) is not implemented yet; skipped",

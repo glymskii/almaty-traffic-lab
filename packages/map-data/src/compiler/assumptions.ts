@@ -3,7 +3,8 @@ import type { Network, NodeKind } from "@atl/contracts";
 /**
  * Kinds of assumptions the generator makes (provenance "default"). Keys are stable identifiers;
  * the UI translates them (apps/web/src/i18n/ru.ts). Counting unit: links for link attributes,
- * lanes for lane attributes.
+ * lanes for lane attributes, and the entity itself for nodes, connectors, zebras, gates and
+ * attractors.
  */
 export const ASSUMPTION_KINDS = [
   "speed_limit_default",
@@ -13,6 +14,12 @@ export const ASSUMPTION_KINDS = [
   "pocket_length_default",
   "bus_lane_hours_default",
   "bus_lane_position_assumed",
+  "merge_node_default",
+  "acceleration_lane_default",
+  "connector_priority_default",
+  "crosswalk_default",
+  "gate_weight_default",
+  "attractor_weight_default",
 ] as const;
 export type AssumptionKind = (typeof ASSUMPTION_KINDS)[number];
 
