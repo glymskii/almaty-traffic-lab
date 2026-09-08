@@ -51,7 +51,10 @@ export class VehiclePool {
   readonly occupancy: Float32Array;
 
   // ---- state ----
+  /** Frame flags: `persistentFlags | per-step flags` (BRAKING, STOPPED, IN_INTERSECTION), rebuilt every step. */
   readonly flags: Uint8Array;
+  /** Flags owned by other subsystems (BUS_LANE_VIOLATOR, NAVIGATOR, DWELLING, BLINKER_*); the kernel never clears them. */
+  readonly persistentFlags: Uint8Array;
   readonly cause: Uint8Array;
   readonly rootCause: Uint8Array;
   readonly spawnTimeS: Float64Array;
@@ -102,6 +105,7 @@ export class VehiclePool {
     this.gapPedestrian = new Float32Array(capacity);
     this.occupancy = new Float32Array(capacity);
     this.flags = new Uint8Array(capacity);
+    this.persistentFlags = new Uint8Array(capacity);
     this.cause = new Uint8Array(capacity);
     this.rootCause = new Uint8Array(capacity);
     this.spawnTimeS = new Float64Array(capacity);

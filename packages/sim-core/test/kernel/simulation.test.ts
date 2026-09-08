@@ -16,25 +16,58 @@ function sim(network = straightRoad(), patch: SimConfigPatch = {}) {
   return createSimulation({ network, config: defaultSimConfig(patch) });
 }
 
-/** Smallest bumper-to-bumper gap and smallest (gap - s0 of the follower) over every track list. */
-function minGaps(s: ReturnType<typeof createSimulation>): { gap: number; gapMinusS0: number } {
+interface GapStats {
+  /** Smallest bumper-to-bumper gap over every consecutive pair. */
+  gap: number;
+  /** Smallest (gap - s0 of the follower) over pairs on the same track. */
+  gapMinusS0: number;
+  /** Smallest (gap - s0 of the follower) over pairs across a track boundary. */
+  crossGapMinusS0: number;
+}
+
+/**
+ * Gap statistics over every pair of consecutive vehicles, including pairs across track boundaries
+ * (head of a track vs the first vehicle on the tracks ahead, following `nextTrack` like the kernel).
+ */
+function minGaps(s: ReturnType<typeof createSimulation>): GapStats {
   const { pool, runtime } = kernelOf(s);
-  let gap = Number.POSITIVE_INFINITY;
-  let gapMinusS0 = Number.POSITIVE_INFINITY;
+  const out: GapStats = {
+    gap: Number.POSITIVE_INFINITY,
+    gapMinusS0: Number.POSITIVE_INFINITY,
+    crossGapMinusS0: Number.POSITIVE_INFINITY,
+  };
   for (let t = 0; t < runtime.trackCount; t++) {
     let i = pool.trackTail[t] as number;
     while (i >= 0) {
       const j = pool.ahead[i] as number;
       if (j >= 0) {
         const g = (pool.s[j] as number) - (pool.length[j] as number) - (pool.s[i] as number);
-        gap = Math.min(gap, g);
-        gapMinusS0 = Math.min(gapMinusS0, g - (pool.minGap[i] as number));
+        out.gap = Math.min(out.gap, g);
+        out.gapMinusS0 = Math.min(out.gapMinusS0, g - (pool.minGap[i] as number));
         expect(pool.s[j] as number).toBeGreaterThanOrEqual(pool.s[i] as number);
+      } else {
+        let dist = (runtime.trackEndS[t] as number) - (pool.s[i] as number);
+        let nt = pool.nextTrack[i] as number;
+        for (let hop = 0; hop < 3 && nt >= 0; hop++) {
+          const leader = pool.trackTail[nt] as number;
+          if (leader >= 0) {
+            const g =
+              dist +
+              (pool.s[leader] as number) -
+              (runtime.trackStartS[nt] as number) -
+              (pool.length[leader] as number);
+            out.gap = Math.min(out.gap, g);
+            out.crossGapMinusS0 = Math.min(out.crossGapMinusS0, g - (pool.minGap[i] as number));
+            break;
+          }
+          dist += (runtime.trackEndS[nt] as number) - (runtime.trackStartS[nt] as number);
+          nt = runtime.trackNextByClass[nt * 4 + (pool.cls[i] as number)] as number;
+        }
       }
       i = j;
     }
   }
-  return { gap, gapMinusS0 };
+  return out;
 }
 
 describe("createSimulation on a straight road", () => {
@@ -154,6 +187,77 @@ describe("createSimulation on a straight road", () => {
     expect(maxActive).toBe(7);
   });
 
+  /** Spawns per entry lane over `seconds` of simulation (new ids are counted on the step they appear). */
+  function spawnsPerLane(s: ReturnType<typeof createSimulation>, seconds: number): number[] {
+    const { pool, runtime } = kernelOf(s);
+    const perLane = new Array<number>(runtime.laneCount).fill(0);
+    let maxId = 0;
+    while (s.simTimeS < seconds) {
+      s.step();
+      let newMax = maxId;
+      for (let i = 0; i < pool.highWater; i++) {
+        const t = pool.track[i] as number;
+        const id = pool.id[i] as number;
+        if (t < 0 || id <= maxId) continue;
+        perLane[t] = (perLane[t] ?? 0) + 1;
+        if (id > newMax) newMax = id;
+      }
+      maxId = newMax;
+    }
+    return perLane;
+  }
+
+  it("prefers the rightmost entry lane when lanes are equally free and spreads out under load", () => {
+    const first = sim(straightRoad({ lanes: 3 }), { demand: { tripsPerHourPeak: 300 } });
+    while (first.vehicleCount() === 0) first.step();
+    const frame = allocateFrameBuffers(10, 0, 0);
+    first.writeFrame(frame);
+    // Lane 2 is the rightmost of three (offset +3.5 m to the right = south of the eastbound axis).
+    expect(frame.y[0]).toBeCloseTo(-3.5, 4);
+
+    // The freest lane wins and ties go right, so no lane dominates at any demand (the old
+    // "+Infinity beats +Infinity" tie-break sent most vehicles to the leftmost lane).
+    for (const rate of [300, 3000]) {
+      const perLane = spawnsPerLane(
+        sim(straightRoad({ lanes: 3 }), { demand: { tripsPerHourPeak: rate } }),
+        600,
+      );
+      const total = perLane.reduce((a, b) => a + b, 0);
+      for (const n of perLane) {
+        expect(n).toBeGreaterThan(total * 0.2);
+        expect(n).toBeLessThan(total * 0.5);
+      }
+    }
+  });
+
+  it("keeps persistent flags across steps and rebuilds per-step flags", () => {
+    const s = sim(straightRoad(), { demand: { tripsPerHourPeak: 1200 } });
+    s.runUntil(60);
+    const { pool } = kernelOf(s);
+    let i = 0;
+    while ((pool.track[i] as number) < 0) i++;
+    pool.persistentFlags[i] = VehicleFlag.NAVIGATOR | VehicleFlag.BLINKER_LEFT;
+    s.step();
+    expect((pool.flags[i] as number) & VehicleFlag.NAVIGATOR).not.toBe(0);
+    expect((pool.flags[i] as number) & VehicleFlag.BLINKER_LEFT).not.toBe(0);
+    pool.persistentFlags[i] = 0;
+    s.step();
+    expect((pool.flags[i] as number) & (VehicleFlag.NAVIGATOR | VehicleFlag.BLINKER_LEFT)).toBe(0);
+  });
+
+  it("takes the hourly profile at the time the step produces, not the time it started", () => {
+    const profile = new Array<number>(24).fill(0);
+    profile[9] = 1;
+    // 08:59:59.94: the first step ends at 09:00:00.04, when the profile switches on.
+    const s = sim(straightRoad(), {
+      startTimeMin: 540 - 0.001,
+      demand: { tripsPerHourPeak: 1e6, hourlyProfile: profile, warmupMinutes: 0 },
+    });
+    s.step();
+    expect(Math.floor(s.timeOfDayMin / 60)).toBe(9);
+    expect(s.vehicleCount()).toBeGreaterThan(0);
+  });
+
   it("keeps the clock in minutes of day and wraps at midnight", () => {
     const s = sim(straightRoad(), { startTimeMin: 1439 });
     expect(s.timeOfDayMin).toBe(1439);
@@ -168,6 +272,8 @@ describe("createSimulation on a straight road", () => {
     const s = sim(straightRoad(), { demand: { tripsPerHourPeak: 600, warmupMinutes: 0 } });
     s.runUntil(200);
     expect(s.segments()).toHaveLength(80);
+    expect(s.segments()).not.toBe(s.segments());
+    expect(Object.isFrozen(s.segments()[0])).toBe(true);
     expect(s.signalGroupIds()).toEqual([]);
     expect(s.crosswalkIds()).toEqual([]);
     const m = s.writeMetrics();
@@ -261,9 +367,9 @@ describe("track transitions", () => {
     expect(st.total.meanTripDelayS).toBeLessThan(8);
   });
 
-  it("removes cars at the end of a lane whose only connector leads to a bus-only lane", () => {
+  it("drops cars at a junction whose only connector leads to a bus-only lane, without a trip", () => {
     const s = sim(twoLinkRoad({ busOnlySecondLink: true }), {
-      demand: { tripsPerHourPeak: 600, warmupMinutes: 1 },
+      demand: { tripsPerHourPeak: 600, warmupMinutes: 0 },
     });
     const frame = allocateFrameBuffers(200, 0, 0);
     let maxX = 0;
@@ -274,9 +380,104 @@ describe("track transitions", () => {
     }
     expect(maxX).toBeLessThanOrEqual(500);
     const st = s.tripStats();
+    const dropped = kernelOf(s).droppedVehicles;
+    expect(dropped).toBeGreaterThan(10);
+    expect(st.total.completed).toBe(0);
+    expect(st.total.spawned).toBe(st.total.active + dropped);
+  });
+
+  it("drops vehicles whose lane ends mid-link and keeps trips of the full-length lane", () => {
+    const net = straightRoad({ lanes: 2 });
+    const lane = net.lanes[1];
+    if (!lane) throw new Error("fixture");
+    lane.endS = 600;
+    // Identical drivers so that completed trips on the single remaining lane are not slowed by platoons.
+    const s = sim(net, {
+      demand: { tripsPerHourPeak: 3000, warmupMinutes: 0, taxiShare: 0 },
+      driver: { desiredSpeedFactor: { mean: 1, sd: 0, min: 0.7, max: 1.3 } },
+    });
+    const { pool, runtime } = kernelOf(s);
+    while (s.simTimeS < 600) {
+      s.step();
+      for (let i = 0; i < pool.highWater; i++) {
+        const t = pool.track[i] as number;
+        if (t >= 0) expect(pool.s[i] as number).toBeLessThan(runtime.trackEndS[t] as number);
+      }
+    }
+    const st = s.tripStats();
+    const dropped = kernelOf(s).droppedVehicles;
+    expect(dropped).toBeGreaterThan(10);
     expect(st.total.completed).toBeGreaterThan(10);
-    expect(st.total.meanTripTimeS).toBeGreaterThan(25);
-    expect(st.total.meanTripTimeS).toBeLessThan(35);
+    expect(st.total.spawned).toBe(st.total.completed + st.total.active + dropped);
+    // Completed trips all ran the full 1000 m of lane 0 (a 600 m trip would take ~36 s).
+    expect(st.total.meanTripTimeS).toBeGreaterThan(55);
+    expect(st.total.meanTripTimeS).toBeLessThan(75);
+  });
+
+  it("holds vehicles at a blocked entry, reports its cause, and keeps gaps >= s0 across boundaries", () => {
+    const s = sim(twoLinkRoad(), { demand: { tripsPerHourPeak: 1200, warmupMinutes: 0 } });
+    const { pool, runtime, entryBlockedCause } = kernelOf(s);
+    const connector = 2;
+    const red = causeCode("signal_red");
+    entryBlockedCause[connector] = red;
+    let worstGap = Number.POSITIVE_INFINITY;
+    let worstSameTrack = Number.POSITIVE_INFINITY;
+    let worstCross = Number.POSITIVE_INFINITY;
+    const track = () => {
+      const g = minGaps(s);
+      worstGap = Math.min(worstGap, g.gap);
+      worstSameTrack = Math.min(worstSameTrack, g.gapMinusS0);
+      worstCross = Math.min(worstCross, g.crossGapMinusS0);
+    };
+    while (s.simTimeS < 180) {
+      s.step();
+      track();
+      for (let i = 0; i < pool.highWater; i++) {
+        const t = pool.track[i] as number;
+        if (t < 0) continue;
+        expect(t).toBe(0);
+        expect(pool.s[i] as number).toBeLessThanOrEqual(500);
+      }
+    }
+    // The head of the queue stands just before the stop line with the signal cause; followers see the leader.
+    const head = pool.trackHead[0] as number;
+    expect(head).toBeGreaterThanOrEqual(0);
+    expect(pool.v[head]).toBeLessThan(0.5);
+    expect((runtime.trackEndS[0] as number) - (pool.s[head] as number)).toBeLessThan(6);
+    expect(pool.cause[head]).toBe(red);
+    const follower = pool.behind[head] as number;
+    expect(follower).toBeGreaterThanOrEqual(0);
+    expect(pool.cause[follower]).toBe(causeCode("leader"));
+    expect(s.tripStats().total.completed).toBe(0);
+
+    entryBlockedCause[connector] = 0;
+    while (s.simTimeS < 480) {
+      s.step();
+      track();
+    }
+    // Across lane -> connector -> lane the gap never drops below the follower's s0. Inside a standing
+    // queue the discrete IDM may stop a few decimetres short of s0 (never a collision), see README.
+    expect(worstCross).toBeGreaterThanOrEqual(0);
+    expect(worstSameTrack).toBeGreaterThan(-1);
+    expect(worstGap).toBeGreaterThan(0.5);
+    expect(s.tripStats().total.completed).toBeGreaterThan(20);
+    expect(kernelOf(s).droppedVehicles).toBe(0);
+  });
+
+  it("keeps gaps >= s0 across lane -> connector -> lane under a speed drop at high demand", () => {
+    const s = sim(twoLinkRoad(), { demand: { tripsPerHourPeak: 1500, warmupMinutes: 0 } });
+    let worst = Number.POSITIVE_INFINITY;
+    let worstCross = Number.POSITIVE_INFINITY;
+    while (s.simTimeS < 600) {
+      s.step();
+      const g = minGaps(s);
+      worst = Math.min(worst, g.gapMinusS0);
+      worstCross = Math.min(worstCross, g.crossGapMinusS0);
+    }
+    expect(worst).toBeGreaterThanOrEqual(0);
+    expect(worstCross).toBeGreaterThanOrEqual(0);
+    expect(worstCross).toBeLessThan(Number.POSITIVE_INFINITY); // boundary pairs were actually observed
+    expect(s.tripStats().total.completed).toBeGreaterThan(100);
   });
 
   it("follows a bent polyline with lane offsets and headings", () => {

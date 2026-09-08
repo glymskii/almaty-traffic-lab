@@ -38,6 +38,20 @@ describe("N25 runtime parameters", () => {
     expect(() => sim.setParams({ metrics: { windowS: 10 } })).toThrow(/metrics\.windowS/);
     expect(JSON.stringify(sim.config)).toBe(snapshot);
   });
+
+  it("a lower multiplier takes effect behind a queue: after multiplier 0 no more than a lane's capacity enters", () => {
+    const sim = createSimulation({
+      network: straightRoad({ lanes: 1 }),
+      config: defaultSimConfig({ seed: 1, demand: { tripsPerHourPeak: 4000, warmupMinutes: 0 } }),
+    });
+    sim.runUntil(300);
+    expect(sim.tripStats().spawnWaits).toBeGreaterThan(0); // the entry is saturated
+    const before = sim.tripStats().total.spawned;
+    sim.setParams({ demand: { multiplier: 0 } });
+    sim.runUntil(360);
+    const entered = sim.tripStats().total.spawned - before;
+    expect(entered).toBeLessThanOrEqual(1800 / 60);
+  });
 });
 
 describe("N26 invariants", () => {

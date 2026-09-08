@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { idmAcceleration, idmFreeAcceleration } from "../../src/models/idm.ts";
+import { IDM_MAX_DECEL, idmAcceleration, idmFreeAcceleration } from "../../src/models/idm.ts";
 
 const T = 1.2;
 const S0 = 2;
@@ -32,10 +32,18 @@ describe("IDM", () => {
   });
 
   it("closing in on a stopped leader brakes harder than the comfortable deceleration", () => {
-    const a = idmAcceleration(20, 20, 20, 50, T, S0, A, B);
-    // s* = 2 + 24 + 400 / (2 sqrt(3)) = 141.47; a = 1.5 * (1 - 1 - (141.47 / 50)^2)
-    expect(a).toBeCloseTo(-1.5 * (141.4700538 / 50) ** 2, 4);
+    // s* = 2 + 24 + 400 / (2 sqrt(3)) = 141.47; a = 1.5 * (1 - 1 - (141.47 / 100)^2) = -3.0
+    const a = idmAcceleration(20, 20, 20, 100, T, S0, A, B);
+    expect(a).toBeCloseTo(-1.5 * (141.4700538 / 100) ** 2, 4);
     expect(a).toBeLessThan(-B);
+  });
+
+  it("never brakes harder than IDM_MAX_DECEL", () => {
+    expect(IDM_MAX_DECEL).toBe(8);
+    expect(idmAcceleration(20, 20, 20, 50, T, S0, A, B)).toBe(-IDM_MAX_DECEL);
+    expect(idmAcceleration(10, 20, 0, 0, T, S0, A, B)).toBe(-IDM_MAX_DECEL);
+    expect(idmFreeAcceleration(60, 20, A)).toBe(-IDM_MAX_DECEL);
+    expect(idmFreeAcceleration(25, 20, A)).toBeGreaterThan(-IDM_MAX_DECEL);
   });
 
   it("is monotonic in the gap and finite for a vanishing gap", () => {
