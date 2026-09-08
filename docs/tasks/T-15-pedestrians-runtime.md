@@ -30,3 +30,11 @@
 
 ## Вне объёма
 3D-люди, диагональные переходы, пешеходные вызывные кнопки.
+
+## Заметки из ревью T-09 (учесть)
+- Пешеходные группы (`SignalGroup.kind: "pedestrian"`) уже участвуют в общей таблице `SignalRuntime`: тот же
+  автомат main GREEN → FLASHING_GREEN → YELLOW → RED → RED_YELLOW (секция по умолчанию `"main"`), без разделения
+  по `kind`. Для «старт перехода — регулируемая зебра только в GREEN/FLASHING_GREEN» просто читай
+  `kernelOf(sim).signals.stateAt(groupIdx, simTimeS)` (или `groupState[groupIdx]` после шага 1) для группы,
+  на которую ссылается `Crosswalk.signalGroupId` — не переизобретай состояние заново и не добавляй пешеходам
+  отдельный автомат/YELLOW-семантику: для пешеходной группы важны только GREEN/FLASHING_GREEN vs остальное.

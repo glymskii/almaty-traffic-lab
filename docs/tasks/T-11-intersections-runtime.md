@@ -60,3 +60,16 @@
 - **Полосы разгона.** `endS < lengthM` и `turns: [merge]`; из них коннекторы не выходят (см. также T-16).
 - **Ворота с нулевыми весами.** 3 из 56 ворот маленького квадрата имеют `weightIn = weightOut = 0` (обрубок
   короче 5 м у границы bbox) — генератор спроса не должен их выбирать.
+
+## Заметки из ревью T-09 (учесть)
+- `RuntimeNetwork.connProtection` (`Uint8Array` по треку, коды в `ProtectionCode` из `runtime/network.ts`) и
+  `connSignalGroup` (глобальный индекс группы или −1) уже заведены — читай их, а не переизобретай индексацию.
+  Сигналы трогают `entryBlockedCause`/`entryBlockedYellow` только там, где `connSignalGroup[t] ≥ 0`; для
+  несигнализированных коннекторов (`connSignalGroup[t] < 0`, обычный gap acceptance) массивы свободны — T-11
+  может писать туда свои причины (`gap_left_turn`, `yield_priority`, `gridlock`, `downstream_spillback`) тем же
+  паттерном виртуального препятствия, что и T-09 (см. `computeAccelerations` в `simulation.ts`).
+- Для проверки permissive-разрыва против встречного потока текущее состояние всех групп доступно через
+  `kernelOf(sim).signals.groupState` (`SignalRuntime`, глобальный порядок = `RuntimeNetwork.signalGroupIds`) —
+  не пересчитывать состояние заново, читать `groupState[connSignalGroup[t]]`.
+- `groupIsArrow` (`Uint8Array`, глобальный индекс группы) уже размечает `arrow_left/arrow_right` — пригодится
+  для N12 (`arrow_off`), не нужно заново парсить `SignalGroup.section`.
