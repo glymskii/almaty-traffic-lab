@@ -483,7 +483,8 @@
 - `kernelOf(sim)` — доступ к `RuntimeNetwork`, `VehiclePool`, `baseTripsPerHour`, `droppedVehicles`,
   `entryBlockedCause`, `entryBlockedYellow`, `signals` (`SignalRuntime`), `lanes` (`LaneRuntime`),
   `intersections` (`IntersectionRuntime`), `pedestrians` (`PedestrianRuntime`, T-15),
-  `segmentIndex` (`SegmentIndex`, T-18), `gridlockDisciplined`,
+  `segmentIndex` (`SegmentIndex`, T-18), `metricsWindow` (`MetricsAccumulators`, T-18 — `stopsInWindow(segment)`
+  и `vcRatio(segment)` мимо кадра), `gridlockDisciplined`,
   а после T-12 — `routingGraph`, `od`, `routeTrees`, `liveTravelS`, `retargetedTrips`, `rebuildRouteTrees()`,
   `rebuildLiveTrees()` и `setTurnShares(linkId, shares)` для тестов и отладки (не часть замороженной
   поверхности).

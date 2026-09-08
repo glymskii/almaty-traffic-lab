@@ -155,6 +155,12 @@ export interface SimulationKernel {
   readonly pedestrians: PedestrianRuntime;
   /** Segment lookup, lengths and capacities behind the metrics window (T-18); see `metrics/segments.ts`. */
   readonly segmentIndex: SegmentIndex;
+  /**
+   * The sliding window itself (T-18). `MetricsFrame` is a frozen contract with no field for stops,
+   * so `metricsWindow.stopsInWindow(segment)` is the only way to read them; `vcRatio(segment)` is
+   * the same V/C the frame carries, without folding a whole frame to get one number.
+   */
+  readonly metricsWindow: MetricsAccumulators;
   /** Per vehicle slot: 1 when the driver refuses to enter a junction whose exit is full (T-11). */
   readonly gridlockDisciplined: Uint8Array;
   /** Link-level routing graph (T-12); see `routing/graph.ts`. */
@@ -200,6 +206,7 @@ export function kernelOf(sim: Simulation): SimulationKernel {
     intersections: sim.intersections,
     pedestrians: sim.pedestrians,
     segmentIndex: sim.segmentIndex,
+    metricsWindow: sim.metricsWindow,
     gridlockDisciplined: sim.gridlockDisciplined,
     routingGraph: sim.routingGraph,
     od: sim.od,
@@ -367,7 +374,8 @@ class SimulationImpl implements Simulation {
   /** Segment geometry, capacities and the lane/connector -> segment lookup. */
   readonly segmentIndex: SegmentIndex;
   private readonly rootCauses: RootCauseResolver;
-  private readonly metrics: MetricsAccumulators;
+  /** Public so `kernelOf` can hand T-19 the stops and V/C the frame has no room for. */
+  readonly metricsWindow: MetricsAccumulators;
   private readonly totalsTracker: TotalsTracker;
   /** Persons per vehicle of each class in the current hour; refreshed at every metrics sample. */
   private readonly occupancyByClass = new Float64Array(CLASS_COUNT);
@@ -541,7 +549,7 @@ class SimulationImpl implements Simulation {
       opts.config.signals.saturationFlowVehPerHPerLane,
     );
     this.rootCauses = new RootCauseResolver(this.runtime, opts.config.demand.vehicleBudget);
-    this.metrics = new MetricsAccumulators(
+    this.metricsWindow = new MetricsAccumulators(
       this.runtime,
       this.segmentIndex,
       opts.config.demand.vehicleBudget,
@@ -617,7 +625,7 @@ class SimulationImpl implements Simulation {
       this.occupancyByClass[c] = peak ? params.occupancyPeak : params.occupancyOffpeak;
     }
     this.rootCauses.resolve(this.pool, this.cfg.metrics.stoppedSpeedMps);
-    this.metrics.sample(this.pool, now, elapsed, this.occupancyByClass, this.cfg.metrics);
+    this.metricsWindow.sample(this.pool, now, elapsed, this.occupancyByClass, this.cfg.metrics);
   }
 
   runUntil(targetSimTimeS: number): void {
@@ -2084,7 +2092,7 @@ class SimulationImpl implements Simulation {
     f.timeOfDayMin = this.clock.timeOfDayMin;
     f.windowS = windowS;
     f.segmentCount = segmentCount;
-    this.metrics.write(f);
+    this.metricsWindow.write(f);
     return f;
   }
 
@@ -2111,7 +2119,7 @@ class SimulationImpl implements Simulation {
     return this.totalsTracker.build(
       this.pool,
       this.runtime,
-      this.metrics,
+      this.metricsWindow,
       this.cfg.metrics.stoppedSpeedMps,
       this.clock.simTimeS,
       { completed, delayS, personDelayS },
