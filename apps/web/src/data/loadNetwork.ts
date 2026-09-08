@@ -15,7 +15,10 @@ const GZIP_MAGIC_1 = 0x8b;
  * page. A response that *is* real gzip but still fails to decode or validate is a genuine bug and
  * is left to throw, so it isn't mistaken for "no file yet".
  */
-export async function loadNetwork(networkId = "small"): Promise<Network> {
+/** Compiled networks are named by bbox preset id (packages/map-data/src/bboxes.ts), not by preset key. */
+export const DEFAULT_NETWORK_ID = "almaty-abay-small";
+
+export async function loadNetwork(networkId = DEFAULT_NETWORK_ID): Promise<Network> {
   let response: Response;
   try {
     response = await fetch(`/networks/${networkId}.network.json.gz`);
