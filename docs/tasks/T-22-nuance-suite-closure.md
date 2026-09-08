@@ -25,3 +25,9 @@
 - `SignalController.offsetS` генератор заполняет нулём с provenance `default`; координация смещений
   намеренно оставлена этой задаче. `regenerateController` (`packages/map-data/src/signals/regenerate.ts`)
   уже умеет применять `offsetS` из override сценария и переставляет provenance в `manual`.
+
+## Заметки от T-14 (учесть)
+- N14–N17 уже закрыты и зелёные (`docs/NUANCES.md`), в инвентаризацию `it.todo` не попадают. Из оставшихся
+  нюансов этой карточки N23 (T-19) стоит перепроверять с поправкой на то, что `occupancy`/`personDelayS`
+  теперь считается по часу окончания поездки, а не появления (`SimulationImpl.despawn()`, T-14) — допуски,
+  посчитанные до этого изменения, могут не совпасть с фактическими числами.
