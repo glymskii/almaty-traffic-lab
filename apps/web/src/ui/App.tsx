@@ -5,6 +5,7 @@ import { Viewport } from "../Viewport.tsx";
 import { Hud } from "./Hud.tsx";
 import { Layout } from "./Layout.tsx";
 import { OverviewTab } from "./OverviewTab.tsx";
+import { ScenariosTab } from "./ScenariosTab.tsx";
 import { TimeBar } from "./TimeBar.tsx";
 import { Tooltip } from "./Tooltip.tsx";
 
@@ -15,10 +16,9 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "compare", label: ru.tabCompare },
 ];
 
-/** The other three tabs are built in later tasks; T-23 only wires up navigation between them. */
+/** The remaining two tabs are built in later tasks; T-23 wired up navigation, T-24 fills in "Сценарии". */
 const STUB_TASK_ID: Partial<Record<TabKey, string>> = {
   bottlenecks: "T-25",
-  scenarios: "T-24",
   compare: "T-26",
 };
 
@@ -45,11 +45,9 @@ function SidePanel() {
         ))}
       </div>
       <div className="tab-content">
-        {activeTab === "overview" || stubTaskId === undefined ? (
-          <OverviewTab />
-        ) : (
-          <p className="tab-stub">{ru.comingSoon(stubTaskId)}</p>
-        )}
+        {activeTab === "overview" && <OverviewTab />}
+        {activeTab === "scenarios" && <ScenariosTab />}
+        {stubTaskId !== undefined && <p className="tab-stub">{ru.comingSoon(stubTaskId)}</p>}
       </div>
     </div>
   );
@@ -66,13 +64,20 @@ export function App() {
   const startTimeMin = useStore((s) => s.startTimeMin);
   const runtimeParams = useStore((s) => s.runtimeParams);
   const appliedRestartParams = useStore((s) => s.appliedRestartParams);
+  const scenarios = useStore((s) => s.scenarios);
+  const appliedScenarioId = useStore((s) => s.appliedScenarioId);
   const bindViewport = useStore((s) => s.bindViewport);
   const setStatus = useStore((s) => s.setStatus);
+  const setSelection = useStore((s) => s.setSelection);
 
   const configPatch = useMemo(
     () => buildConfigPatch({ startTimeMin, runtime: runtimeParams, restart: appliedRestartParams }),
     [startTimeMin, runtimeParams, appliedRestartParams],
   );
+  // "baseline" (the synthetic no-overrides scenario, docs/tasks/T-24) is never in `scenarios`, so
+  // this is undefined for it - Viewport then renders the network exactly as compiled, no override
+  // pass at all.
+  const appliedScenario = scenarios.find((s) => s.id === appliedScenarioId);
 
   return (
     <Layout
@@ -81,8 +86,11 @@ export function App() {
           key={restartToken}
           networkId={NETWORK_IDS[networkKey]}
           configPatch={configPatch}
+          scenarioOverrides={appliedScenario?.overrides}
+          scenarioId={appliedScenario?.id}
           onReady={bindViewport}
           onStatus={setStatus}
+          onSelect={setSelection}
         />
       }
       sidePanel={<SidePanel />}

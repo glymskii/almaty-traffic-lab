@@ -11,7 +11,9 @@ import {
 const initialState = useStore.getState();
 
 beforeEach(() => {
-  // The store is a module-level singleton; give every test a clean slate.
+  // The store is a module-level singleton; give every test a clean slate. Scenario actions also
+  // write to localStorage, so that needs clearing too or a later test would see a leftover write.
+  localStorage.clear();
   useStore.setState(initialState, true);
 });
 
@@ -128,5 +130,140 @@ describe("useStore actions", () => {
     const state = useStore.getState();
     expect(state.appliedRestartParams.vehicleBudget).toBe(5000);
     expect(needsRestart(state.appliedRestartParams, state.draftRestartParams)).toBe(false);
+  });
+
+  it("setNetworkKey drops the scenario selection back to baseline (a scenario belongs to one network)", () => {
+    useStore.getState().createScenario("A");
+    expect(useStore.getState().activeScenarioId).not.toBe("baseline");
+    useStore.getState().setNetworkKey("big");
+    const state = useStore.getState();
+    expect(state.activeScenarioId).toBe("baseline");
+    expect(state.appliedScenarioId).toBe("baseline");
+  });
+});
+
+describe("useStore scenario actions (docs/tasks/T-24)", () => {
+  it("createScenario adds one for the current network and selects it as active", () => {
+    useStore.getState().createScenario("Час пик");
+    const state = useStore.getState();
+    expect(state.scenarios).toHaveLength(1);
+    expect(state.scenarios[0]?.name).toBe("Час пик");
+    expect(state.scenarios[0]?.networkId).toBe("almaty-abay-small");
+    expect(state.activeScenarioId).toBe(state.scenarios[0]?.id);
+  });
+
+  it("persists created scenarios to localStorage", () => {
+    useStore.getState().createScenario("A");
+    const id = useStore.getState().scenarios[0]?.id;
+    const stored = JSON.parse(localStorage.getItem("atl.scenarios.v1") ?? "[]");
+    expect(stored).toHaveLength(1);
+    expect(stored[0].id).toBe(id);
+  });
+
+  it("duplicateScenario copies overrides under a new id and selects the copy", () => {
+    useStore.getState().createScenario("A");
+    const sourceId = useStore.getState().scenarios[0]?.id as string;
+    useStore
+      .getState()
+      .upsertOverrideInActiveScenario({ kind: "link", linkId: "l0", set: { generalLanes: 3 } });
+    useStore.getState().duplicateScenario(sourceId, "A (копия)");
+    const state = useStore.getState();
+    expect(state.scenarios).toHaveLength(2);
+    const copy = state.scenarios.find((s) => s.id === state.activeScenarioId);
+    expect(copy?.name).toBe("A (копия)");
+    expect(copy?.overrides).toEqual(state.scenarios[0]?.overrides);
+  });
+
+  it("renameScenario updates the name in place without changing which scenario is active", () => {
+    useStore.getState().createScenario("A");
+    const id = useStore.getState().scenarios[0]?.id as string;
+    useStore.getState().setActiveScenarioId("baseline");
+    useStore.getState().renameScenario(id, "B");
+    const state = useStore.getState();
+    expect(state.scenarios.find((s) => s.id === id)?.name).toBe("B");
+    expect(state.activeScenarioId).toBe("baseline");
+  });
+
+  it("deleteScenario removes it and falls back to baseline if it was selected", () => {
+    useStore.getState().createScenario("A");
+    const id = useStore.getState().scenarios[0]?.id as string;
+    useStore.getState().deleteScenario(id);
+    const state = useStore.getState();
+    expect(state.scenarios).toHaveLength(0);
+    expect(state.activeScenarioId).toBe("baseline");
+  });
+
+  it("deleteScenario refuses to delete the baseline id", () => {
+    useStore.getState().deleteScenario("baseline");
+    expect(useStore.getState().scenarios).toHaveLength(0);
+  });
+
+  it("upsertOverrideInActiveScenario is a no-op while baseline is active", () => {
+    useStore
+      .getState()
+      .upsertOverrideInActiveScenario({ kind: "link", linkId: "l0", set: { generalLanes: 3 } });
+    expect(useStore.getState().scenarios).toHaveLength(0);
+  });
+
+  it("upsertOverrideInActiveScenario writes into the active scenario and persists it", () => {
+    useStore.getState().createScenario("A");
+    useStore
+      .getState()
+      .upsertOverrideInActiveScenario({ kind: "link", linkId: "l0", set: { generalLanes: 3 } });
+    const scenario = useStore.getState().scenarios[0];
+    expect(scenario?.overrides).toEqual([{ kind: "link", linkId: "l0", set: { generalLanes: 3 } }]);
+  });
+
+  it("removeOverrideFromActiveScenario drops a previously added override", () => {
+    useStore.getState().createScenario("A");
+    useStore
+      .getState()
+      .upsertOverrideInActiveScenario({ kind: "link", linkId: "l0", set: { generalLanes: 3 } });
+    useStore.getState().removeOverrideFromActiveScenario("link", "l0");
+    expect(useStore.getState().scenarios[0]?.overrides).toEqual([]);
+  });
+
+  it("runActiveScenario applies the draft scenario and bumps restartToken (same fold as restart())", () => {
+    useStore.getState().createScenario("A");
+    const activeId = useStore.getState().activeScenarioId;
+    const tokenBefore = useStore.getState().restartToken;
+    useStore.getState().setDraftRestartParam("vehicleBudget", 5000);
+    useStore.getState().runActiveScenario();
+    const state = useStore.getState();
+    expect(state.appliedScenarioId).toBe(activeId);
+    expect(state.restartToken).toBe(tokenBefore + 1);
+    expect(state.appliedRestartParams.vehicleBudget).toBe(5000);
+  });
+
+  it("importScenario validates the network id and adds/selects the scenario", () => {
+    useStore.getState().createScenario("A");
+    const json = JSON.stringify({
+      id: "imported-1",
+      name: "Imported",
+      networkId: "almaty-abay-small",
+      overrides: [],
+      params: {},
+    });
+    useStore.getState().importScenario(json);
+    const state = useStore.getState();
+    expect(state.scenarios).toHaveLength(2);
+    expect(state.activeScenarioId).toBe("imported-1");
+  });
+
+  it("importScenario throws (and changes nothing) for a scenario authored on another network", () => {
+    const json = JSON.stringify({
+      id: "imported-1",
+      name: "Imported",
+      networkId: "some-other-network",
+      overrides: [],
+      params: {},
+    });
+    expect(() => useStore.getState().importScenario(json)).toThrow();
+    expect(useStore.getState().scenarios).toHaveLength(0);
+  });
+
+  it("setSelection stores the clicked map object", () => {
+    useStore.getState().setSelection({ kind: "link", id: "l0" });
+    expect(useStore.getState().selection).toEqual({ kind: "link", id: "l0" });
   });
 });
