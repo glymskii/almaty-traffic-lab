@@ -1,7 +1,9 @@
 import {
+  type BottleneckReport,
   baselineScenario,
   defaultSimConfig,
   type InitStats,
+  type MetricsFrame,
   type Network,
   type SimConfigPatch,
   VehicleFlag,
@@ -29,19 +31,35 @@ export function wantsStubSimulation(search: string): boolean {
   return new URLSearchParams(search).get("sim") === "stub";
 }
 
+/** Snapshot of the most recent `frame` message - HUD reads this at its own throttled rate instead of subscribing per-frame. */
+export interface FrameMeta {
+  simTimeS: number;
+  timeOfDayMin: number;
+  rtFactor: number;
+  vehicleCount: number;
+}
+
 export interface SimHandle {
   readonly stats: InitStats;
   play(speedFactor: number): void;
   pause(): void;
   /** Resolves once the worker reaches `simTimeS` (warm-up / fast-forward); `onProgress` fires along the way. */
   runUntil(simTimeS: number): Promise<void>;
+  /** Patches a running sim; the worker rejects any path outside `RUNTIME_SAFE_PARAM_PATHS` (T-23 ParamsPanel). */
+  setParams(patch: SimConfigPatch): void;
+  /** Asks the worker to push a `BottleneckReport` now, in addition to the one it sends every `metrics.windowS` on its own. */
+  requestReport(): void;
   onProgress(cb: (simTimeS: number, targetSimTimeS: number) => void): () => void;
   onError(cb: (message: string, fatal: boolean) => void): () => void;
+  onMetrics(cb: (frame: MetricsFrame) => void): () => void;
+  onReport(cb: (report: BottleneckReport) => void): () => void;
   /** Advances the display clock by `dtS` real seconds (scaled by the last `play` speed) and writes the interpolated pose into `out`. */
   sampleVehicles(dtS: number, out: RenderFrame): void;
   /** Latest values as of the last received frame - signals/pedestrian counts are discrete state, not lerped like position. */
   signalStates(): Uint8Array;
   crosswalkPeds(): Uint8Array;
+  /** Same object every call, mutated in place as frames arrive (T-23 Hud polls it, no need for its own subscription). */
+  latestFrameMeta(): FrameMeta;
   dispose(): void;
 }
 
@@ -58,6 +76,7 @@ export async function startSim(
   let latestFrameSimTimeS = 0;
   let displaySimTimeS = 0;
   let speedFactor = 0;
+  const frameMeta: FrameMeta = { simTimeS: 0, timeOfDayMin: 0, rtFactor: 1, vehicleCount: 0 };
 
   const offFrame = client.onFrame((ev) => {
     if (!interpBuf) return; // frames only ever arrive after init() resolves below; defensive only
@@ -65,6 +84,10 @@ export async function startSim(
     signalStatesLatest.set(ev.frame.signalStates);
     crosswalkPedsLatest.set(ev.frame.crosswalkPeds);
     latestFrameSimTimeS = ev.simTimeS;
+    frameMeta.simTimeS = ev.simTimeS;
+    frameMeta.timeOfDayMin = ev.timeOfDayMin;
+    frameMeta.rtFactor = ev.rtFactor;
+    frameMeta.vehicleCount = ev.vehicleCount;
   });
 
   const stats = await client.init(
@@ -87,8 +110,12 @@ export async function startSim(
       client.pause();
     },
     runUntil: (simTimeS) => client.runUntil(simTimeS),
+    setParams: (patch) => client.setParams(patch),
+    requestReport: () => client.requestReport(),
     onProgress: client.onProgress,
     onError: client.onError,
+    onMetrics: client.onMetrics,
+    onReport: client.onReport,
     sampleVehicles(dtS, out) {
       if (!interpBuf) {
         out.count = 0;
@@ -101,6 +128,7 @@ export async function startSim(
     },
     signalStates: () => signalStatesLatest,
     crosswalkPeds: () => crosswalkPedsLatest,
+    latestFrameMeta: () => frameMeta,
     dispose() {
       offFrame();
       client.dispose();
