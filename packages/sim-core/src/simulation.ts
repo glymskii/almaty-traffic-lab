@@ -107,11 +107,31 @@ export interface SimulationKernel {
   readonly pool: VehiclePool;
   /** Trips per hour at profile value 1.0: `demand.tripsPerHourPeak` or the auto estimate. */
   readonly baseTripsPerHour: number;
+  /**
+   * Vehicles removed because their lane ended without a permitted continuation away from a gate or
+   * dead end (lane ending mid-link, junction without a connector for the class). Not trips: they are
+   * neither completed nor active. Non-zero means the network or the lane logic has a gap (T-10/T-12).
+   */
+  readonly droppedVehicles: number;
+  /**
+   * Per track: 0 = entry free, otherwise the cause code a vehicle reports while it waits at the end of
+   * its current track because entering this track is not permitted. Filled by signals (T-09),
+   * conflicts (T-11) and pedestrians (T-15); the kernel only reads it.
+   */
+  readonly entryBlockedCause: Uint8Array;
 }
 
 export function kernelOf(sim: Simulation): SimulationKernel {
   if (!(sim instanceof SimulationImpl)) throw new Error("kernelOf: not a sim-core simulation");
-  return { runtime: sim.runtime, pool: sim.pool, baseTripsPerHour: sim.baseTripsPerHour };
+  return {
+    runtime: sim.runtime,
+    pool: sim.pool,
+    baseTripsPerHour: sim.baseTripsPerHour,
+    get droppedVehicles() {
+      return sim.droppedVehicles;
+    },
+    entryBlockedCause: sim.entryBlockedCause,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -128,6 +148,8 @@ const CRUISE_SPEED_RATIO = 0.95;
 const LEADER_BINDING_MPS2 = 0.1;
 /** A vehicle without a leader on its track looks this far (metres) into the following tracks. */
 const LOOKAHEAD_HORIZON_M = 250;
+/** Arrivals wait at a gate for at most this much demand (seconds of the current rate) before they are discarded. */
+const GATE_QUEUE_HORIZON_S = 120;
 const LOOKAHEAD_MAX_TRACKS = 3;
 /** Track transitions allowed in one step (chains of very short connectors). */
 const MAX_HOPS_PER_STEP = 4;
@@ -171,6 +193,11 @@ class SimulationImpl implements Simulation {
   private readonly gateWaitCounted: Int32Array;
   private scratchTail = -1;
 
+  /** See SimulationKernel.entryBlockedCause. */
+  readonly entryBlockedCause: Uint8Array;
+  /** See SimulationKernel.droppedVehicles. */
+  droppedVehicles = 0;
+
   // ---- trip counters (after warm-up), indexed by class code ----
   private readonly activeByClass = new Int32Array(CLASS_COUNT);
   private readonly spawnedByClass = new Float64Array(CLASS_COUNT);
@@ -201,6 +228,8 @@ class SimulationImpl implements Simulation {
           opts.config.signals.saturationFlowVehPerHPerLane;
     this.warmupEndS = demand.warmupMinutes * 60;
 
+    this.entryBlockedCause = new Uint8Array(this.runtime.trackCount);
+
     const gateCount = this.runtime.gateCount;
     this.gateBudget = new Float64Array(gateCount);
     this.gateWaiting = new Int32Array(gateCount);
@@ -226,8 +255,11 @@ class SimulationImpl implements Simulation {
   // ---- stepping ----------------------------------------------------------
 
   step(): void {
+    // The state produced by this step belongs to t + dt: advance the clock first so that every
+    // time-dependent stage (profiles, peak hours, trip times) reads the same time.
+    this.clock.advance();
     const dt = this.clock.dtS;
-    const now = this.clock.simTimeS + dt;
+    const now = this.clock.simTimeS;
     // 1-5 (signals, pedestrians, routing, lane selection, lane changes): later tasks.
     this.computeAccelerations(); // 6
     this.integrate(dt, now); // 7
@@ -235,14 +267,19 @@ class SimulationImpl implements Simulation {
     this.spawn(dt, now); // 8
     this.updatePositions();
     this.foldHash();
-    this.clock.advance();
   }
 
   runUntil(targetSimTimeS: number): void {
     while (this.clock.simTimeS < targetSimTimeS - 1e-9) this.step();
   }
 
-  /** IDM against the leader on the same track or, failing that, the first vehicle on the tracks ahead. */
+  /**
+   * Longitudinal model (ARCHITECTURE, step 6). Every vehicle starts from its free-road IDM
+   * acceleration and then takes the minimum over its obstacles; the obstacle that wins becomes the
+   * binding constraint (`cause`). Obstacles today: the leader (on this track or the first vehicle on
+   * the tracks ahead) and a stop line at the end of the track when entering the next track is blocked
+   * (`entryBlockedCause`, filled by later subsystems). Later tasks add obstacles to this loop.
+   */
   private computeAccelerations(): void {
     const pool = this.pool;
     const rt = this.runtime;
@@ -260,6 +297,7 @@ class SimulationImpl implements Simulation {
     const trackEnd = rt.trackEndS;
     const trackSpeed = rt.trackSpeedMps;
     const trackNext = rt.trackNextByClass;
+    const entryBlocked = this.entryBlockedCause;
     const n = pool.highWater;
     for (let i = 0; i < n; i++) {
       const t = track[i] as number;
@@ -267,7 +305,11 @@ class SimulationImpl implements Simulation {
       const vi = v[i] as number;
       const si = s[i] as number;
       const v0 = (trackSpeed[t] as number) * (pool.speedFactor[i] as number);
-      const aMax = pool.maxAccel[i] as number;
+      const aFree = idmFreeAcceleration(vi, v0, pool.maxAccel[i] as number);
+      let acc = aFree;
+      let c: number = vi >= CRUISE_SPEED_RATIO * v0 ? CAUSE_SPEED_LIMIT : CAUSE_FREE_FLOW;
+
+      // Obstacle: the leader on this track, or the first vehicle on the tracks ahead.
       let leader = ahead[i] as number;
       let gap = Number.POSITIVE_INFINITY;
       if (leader >= 0) {
@@ -294,28 +336,51 @@ class SimulationImpl implements Simulation {
           nt = trackNext[nt * CLASS_COUNT + (cls[i] as number)] as number;
         }
       }
-      const aFree = idmFreeAcceleration(vi, v0, aMax);
-      let acc = aFree;
-      let c = vi >= CRUISE_SPEED_RATIO * v0 ? CAUSE_SPEED_LIMIT : CAUSE_FREE_FLOW;
       if (leader >= 0) {
-        const aLead = idmAcceleration(
-          vi,
-          v0,
-          vi - (v[leader] as number),
-          gap,
-          pool.timeHeadway[i] as number,
-          pool.minGap[i] as number,
-          aMax,
-          pool.comfortDecel[i] as number,
-        );
-        if (aLead < acc) {
-          acc = aLead;
-          if (aFree - aLead >= LEADER_BINDING_MPS2) c = CAUSE_LEADER;
+        const aLeader = this.accelTowardObstacle(i, vi, v0, gap, v[leader] as number);
+        if (aLeader < acc) {
+          acc = aLeader;
+          if (aFree - aLeader >= LEADER_BINDING_MPS2) c = CAUSE_LEADER;
         }
       }
+
+      // Obstacle: stop line at the end of this track while entering the next track is blocked.
+      const next = nextTrack[i] as number;
+      if (next >= 0) {
+        const blocked = entryBlocked[next] as number;
+        if (blocked !== 0) {
+          const aStop = this.accelTowardObstacle(i, vi, v0, (trackEnd[t] as number) - si, 0);
+          if (aStop < acc) {
+            acc = aStop;
+            if (aFree - aStop >= LEADER_BINDING_MPS2) c = blocked;
+          }
+        }
+      }
+
       a[i] = acc;
       cause[i] = c;
     }
+  }
+
+  /** IDM acceleration of vehicle `i` (speed `v`, desired `v0`) towards an obstacle `gap` metres ahead. */
+  private accelTowardObstacle(
+    i: number,
+    v: number,
+    v0: number,
+    gap: number,
+    vObstacle: number,
+  ): number {
+    const pool = this.pool;
+    return idmAcceleration(
+      v,
+      v0,
+      v - vObstacle,
+      gap,
+      pool.timeHeadway[i] as number,
+      pool.minGap[i] as number,
+      pool.maxAccel[i] as number,
+      pool.comfortDecel[i] as number,
+    );
   }
 
   /** Semi-implicit Euler: v += a dt, s += v dt; track transitions and exits at track ends. */
@@ -327,6 +392,7 @@ class SimulationImpl implements Simulation {
     const v = pool.v;
     const a = pool.a;
     const flags = pool.flags;
+    const persistent = pool.persistentFlags;
     const stops = pool.stops;
     const trackEnd = rt.trackEndS;
     const laneCount = rt.laneCount;
@@ -351,11 +417,11 @@ class SimulationImpl implements Simulation {
         s[i] = sNew;
       }
       if ((track[i] as number) >= laneCount) fl |= VehicleFlag.IN_INTERSECTION;
-      flags[i] = fl;
+      flags[i] = (persistent[i] as number) | fl;
     }
   }
 
-  /** Moves vehicle `i`, whose new coordinate `sBeyond` passed the end of its track. False when it exited. */
+  /** Moves vehicle `i`, whose new coordinate `sBeyond` passed the end of its track. False when it left. */
   private advanceTrack(i: number, sBeyond: number, now: number): boolean {
     const pool = this.pool;
     const rt = this.runtime;
@@ -364,7 +430,8 @@ class SimulationImpl implements Simulation {
     for (let hop = 0; hop < MAX_HOPS_PER_STEP; hop++) {
       const next = pool.nextTrack[i] as number;
       if (next < 0) {
-        this.despawn(i, now);
+        if (rt.trackIsExit[t] === 1) this.despawn(i, now);
+        else this.drop(i);
         return false;
       }
       const overshoot = sPos - (rt.trackEndS[t] as number);
@@ -406,6 +473,16 @@ class SimulationImpl implements Simulation {
     pool.release(i);
   }
 
+  /** Removes a vehicle that ran out of lane away from any exit; not a trip (see droppedVehicles). */
+  private drop(i: number): void {
+    const pool = this.pool;
+    const c = pool.cls[i] as number;
+    this.activeByClass[c] = (this.activeByClass[c] as number) - 1;
+    this.droppedVehicles++;
+    pool.remove(i);
+    pool.release(i);
+  }
+
   /** Keeps every track list sorted by `s` (a no-op walk unless a follower overtook its leader). */
   private repairOrder(): void {
     const pool = this.pool;
@@ -416,7 +493,11 @@ class SimulationImpl implements Simulation {
     }
   }
 
-  /** Poisson arrivals per gate (intensity from the hourly profile), placed when the entry lane has room. */
+  /**
+   * Poisson arrivals per gate (intensity from the hourly profile), placed when an entry lane has room.
+   * Arrivals that cannot enter wait in a per-gate counter capped at GATE_QUEUE_HORIZON_S seconds of
+   * the current rate, so a lower multiplier takes effect at once even behind a queue.
+   */
   private spawn(dt: number, now: number): void {
     const cfg = this.cfg;
     const demand = cfg.demand;
@@ -430,12 +511,18 @@ class SimulationImpl implements Simulation {
     for (let g = 0; g < rt.gateCount; g++) {
       const share = rt.gateShare[g] as number;
       if (share <= 0) continue;
-      let budget = (this.gateBudget[g] as number) - ratePerS * share * dt;
+      const gateRate = ratePerS * share;
+      let budget = (this.gateBudget[g] as number) - gateRate * dt;
+      let waiting = this.gateWaiting[g] as number;
       while (budget <= 0) {
-        this.gateWaiting[g] = (this.gateWaiting[g] as number) + 1;
+        waiting++;
         budget += this.spawnRng.exponential(1);
       }
       this.gateBudget[g] = budget;
+      const cap = Math.ceil(gateRate * GATE_QUEUE_HORIZON_S);
+      if (waiting > cap) waiting = cap;
+      this.gateWaiting[g] = waiting;
+      if ((this.gateWaitCounted[g] as number) > waiting) this.gateWaitCounted[g] = waiting;
 
       let blockedByLane = false;
       while ((this.gateWaiting[g] as number) > 0) {
@@ -463,8 +550,9 @@ class SimulationImpl implements Simulation {
   }
 
   /**
-   * Entry lane of gate `g` with the largest free space at its start among lanes admitting the class,
-   * or -1 when none has at least `needM` metres. Leaves the lane's last vehicle in `scratchTail`.
+   * Entry lane of gate `g` with the largest free space at its start among lanes admitting the class
+   * (ties go to the rightmost lane), or -1 when none has at least `needM` metres. Leaves the lane's
+   * last vehicle in `scratchTail`.
    */
   private bestEntryLane(g: number, clsCode: number, needM: number): number {
     const rt = this.runtime;
@@ -473,7 +561,7 @@ class SimulationImpl implements Simulation {
     const start = rt.gateLaneStart[g] as number;
     const count = rt.gateLaneCount[g] as number;
     let best = -1;
-    let bestGap = -1;
+    let bestGap = Number.NEGATIVE_INFINITY;
     let bestTail = -1;
     for (let k = 0; k < count; k++) {
       const lane = rt.gateLanes[start + k] as number;
@@ -485,7 +573,7 @@ class SimulationImpl implements Simulation {
             (pool.length[tail] as number) -
             (rt.trackStartS[lane] as number)
           : Number.POSITIVE_INFINITY;
-      if (gap > bestGap) {
+      if (gap >= bestGap) {
         bestGap = gap;
         best = lane;
         bestTail = tail;
@@ -531,6 +619,7 @@ class SimulationImpl implements Simulation {
     pool.a[i] = 0;
     pool.nextTrack[i] = rt.trackNextByClass[lane * CLASS_COUNT + (pool.cls[i] as number)] as number;
     pool.geomSeg[i] = 0;
+    pool.persistentFlags[i] = 0;
     pool.flags[i] = vEntry <= this.cfg.metrics.stoppedSpeedMps ? VehicleFlag.STOPPED : 0;
     pool.cause[i] = CAUSE_FREE_FLOW;
     pool.rootCause[i] = CAUSE_FREE_FLOW;
@@ -619,6 +708,7 @@ class SimulationImpl implements Simulation {
     return frame;
   }
 
+  /** Fresh array of frozen descriptors: callers may reorder the array but not edit a segment. */
   segments(): SegmentDescriptor[] {
     return this.runtime.segments.slice();
   }
@@ -721,7 +811,13 @@ class SimulationImpl implements Simulation {
       }
     }
     if (paths.length === 0) return;
+    const multiplierBefore = this.cfg.demand.multiplier;
     this.cfg = applyConfigPatch(this.cfg, patch);
+    if (this.cfg.demand.multiplier < multiplierBefore) {
+      // Demand went down: arrivals queued under the old rate must not keep entering.
+      this.gateWaiting.fill(0);
+      this.gateWaitCounted.fill(0);
+    }
   }
 
   trajectoryHash(): string {

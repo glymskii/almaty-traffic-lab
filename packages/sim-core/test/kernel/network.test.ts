@@ -31,6 +31,8 @@ describe("RuntimeNetwork", () => {
     expect(rt.gateShare[0]).toBe(1);
     expect(rt.gateShare[1]).toBe(0);
     expect(rt.entryLaneCount).toBe(2);
+    // Both lanes end at a gate: vehicles leave the network there.
+    expect(Array.from(rt.trackIsExit)).toEqual([1, 1]);
     // 1000 m / 25 m = 40 segments per lane, the last one approaches n1.
     expect(rt.segments).toHaveLength(80);
     expect(rt.laneSegStart[1]).toBe(40);
@@ -44,6 +46,7 @@ describe("RuntimeNetwork", () => {
     });
     expect(rt.segments[38]?.approachNodeId).toBeUndefined();
     expect(rt.segments[0]?.freeFlowSpeedMps).toBeCloseTo(60 / 3.6, 10);
+    expect(Object.isFrozen(rt.segments[0])).toBe(true);
     expect(rt.signalGroupIds).toEqual([]);
     expect(rt.crosswalkIds).toEqual([]);
   });
@@ -78,11 +81,25 @@ describe("RuntimeNetwork", () => {
       expect(rt.trackNextByClass[1 * CLASS_COUNT + c]).toBe(-1);
     }
     expect(rt.entryLaneCount).toBe(1);
+    // Only the lane ending at the far gate is an exit; the junction and the connector are not.
+    expect(Array.from(rt.trackIsExit)).toEqual([0, 1, 0]);
 
     const busOnly = new RuntimeNetwork(twoLinkRoad({ busOnlySecondLink: true }), 25);
     expect(busOnly.trackNextByClass[0 * CLASS_COUNT + VEHICLE_CLASS_CODE.car]).toBe(-1);
     expect(busOnly.trackNextByClass[0 * CLASS_COUNT + VEHICLE_CLASS_CODE.taxi]).toBe(-1);
     expect(busOnly.trackNextByClass[0 * CLASS_COUNT + VEHICLE_CLASS_CODE.bus]).toBe(2);
+  });
+
+  it("does not treat a lane that ends mid-link as an exit", () => {
+    const net = straightRoad({ lanes: 2 });
+    const lane = net.lanes[1];
+    if (!lane) throw new Error("fixture");
+    lane.endS = 600;
+    const rt = new RuntimeNetwork(net, 25);
+    expect(rt.laneReachesLinkEnd[1]).toBe(0);
+    expect(rt.trackIsExit[1]).toBe(0);
+    expect(rt.trackIsExit[0]).toBe(1);
+    expect(rt.laneSegCount[1]).toBe(24);
   });
 
   it("locates polyline segments from a cached hint in both directions", () => {

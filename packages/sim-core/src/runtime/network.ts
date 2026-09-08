@@ -92,8 +92,14 @@ export class RuntimeNetwork {
   readonly trackAllowedMask: Uint8Array;
   /** Owning link for lanes, -1 for connectors. */
   readonly trackLink: Int32Array;
-  /** [track * CLASS_COUNT + cls] -> next track for a vehicle of that class, -1 = leaves the network. */
+  /** [track * CLASS_COUNT + cls] -> next track for a vehicle of that class, -1 = no permitted continuation. */
   readonly trackNextByClass: Int32Array;
+  /**
+   * 1 for a lane that reaches the end of its link at a gate or dead-end node: a vehicle without a
+   * permitted continuation there leaves the network (trip completed). Anywhere else (lane ending
+   * mid-link, junction without a permitted connector) such a vehicle is dropped, see README.
+   */
+  readonly trackIsExit: Uint8Array;
 
   // ---- lanes ----
   /** Position of the lane inside its link (0 = leftmost). */
@@ -142,8 +148,8 @@ export class RuntimeNetwork {
   /** Number of entry lanes over all gates (capacity estimate for auto demand). */
   readonly entryLaneCount: number;
 
-  // ---- metrics segments (per lane, fixed order) ----
-  readonly segments: SegmentDescriptor[];
+  // ---- metrics segments (per lane, fixed order; descriptors are frozen) ----
+  readonly segments: readonly SegmentDescriptor[];
   readonly laneSegStart: Int32Array;
   readonly laneSegCount: Int32Array;
   readonly laneSegLengthM: Float64Array;
@@ -285,6 +291,7 @@ export class RuntimeNetwork {
     this.trackAllowedMask = new Uint8Array(trackCount);
     this.trackLink = new Int32Array(trackCount).fill(-1);
     this.trackNextByClass = new Int32Array(trackCount * CLASS_COUNT).fill(-1);
+    this.trackIsExit = new Uint8Array(trackCount);
 
     this.lanePos = new Int32Array(laneCount);
     this.laneLeft = new Int32Array(laneCount).fill(-1);
@@ -302,8 +309,11 @@ export class RuntimeNetwork {
       this.trackAllowedMask[i] = allowedMask(lane.allowed);
       this.trackLink[i] = link;
       this.lanePos[i] = lane.index;
-      this.laneReachesLinkEnd[i] =
-        lane.endS >= (this.linkLengthM[link] as number) - LANE_END_EPS_M ? 1 : 0;
+      const reachesEnd = lane.endS >= (this.linkLengthM[link] as number) - LANE_END_EPS_M;
+      this.laneReachesLinkEnd[i] = reachesEnd ? 1 : 0;
+      const toKind = this.nodeKind[this.linkTo[link] as number] as number;
+      this.trackIsExit[i] =
+        reachesEnd && (toKind === NodeKindCode.gate || toKind === NodeKindCode.dead_end) ? 1 : 0;
     }
     // Lateral offsets and neighbours from the link's lane order.
     for (let l = 0; l < linkCount; l++) {
@@ -432,7 +442,7 @@ export class RuntimeNetwork {
     }
 
     // ---- metrics segments ----
-    this.segments = [];
+    const segments: SegmentDescriptor[] = [];
     this.laneSegStart = new Int32Array(laneCount);
     this.laneSegCount = new Int32Array(laneCount);
     this.laneSegLengthM = new Float64Array(laneCount);
@@ -444,7 +454,7 @@ export class RuntimeNetwork {
       const lengthM = lane.endS - lane.startS;
       const n = Math.max(1, Math.round(lengthM / segmentLengthM));
       const piece = lengthM / n;
-      this.laneSegStart[i] = this.segments.length;
+      this.laneSegStart[i] = segments.length;
       this.laneSegCount[i] = n;
       this.laneSegLengthM[i] = piece;
       const freeFlowSpeedMps = this.trackSpeedMps[i] as number;
@@ -453,7 +463,7 @@ export class RuntimeNetwork {
         const endS = k === n - 1 ? lane.endS : lane.startS + (k + 1) * piece;
         const isApproach = k === n - 1 && this.laneReachesLinkEnd[i] === 1 && linkObj !== undefined;
         const seg: SegmentDescriptor = {
-          index: this.segments.length,
+          index: segments.length,
           laneId: lane.id,
           linkId: lane.linkId,
           startS,
@@ -461,9 +471,10 @@ export class RuntimeNetwork {
           freeFlowSpeedMps,
         };
         if (isApproach && linkObj) seg.approachNodeId = linkObj.toNodeId;
-        this.segments.push(seg);
+        segments.push(Object.freeze(seg));
       }
     }
+    this.segments = segments;
 
     // ---- signal groups and crosswalks ----
     this.signalGroupIds = [];
