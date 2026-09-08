@@ -35,6 +35,8 @@ export interface WayPiece {
   wayId: number;
   attrs: WayAttrs;
   vertices: GraphVertex[];
+  /** Vertex order runs against the OSM way's node order (oneway=-1). */
+  wayReversed: boolean;
 }
 
 export interface OsmGraph {
@@ -191,7 +193,7 @@ export function buildOsmGraph(
       warn(`way ${w.id}: node ${missing} has no coordinates in the snapshot; way skipped`);
       continue;
     }
-    pieces.push(...clipWay(w.id, parsed.attrs, ids, pts, rect, gateKeys));
+    pieces.push(...clipWay(w.id, parsed.attrs, parsed.reversed, ids, pts, rect, gateKeys));
   }
 
   const signalKeys = new Set<string>();
@@ -208,6 +210,7 @@ export function buildOsmGraph(
 function clipWay(
   wayId: number,
   attrs: WayAttrs,
+  wayReversed: boolean,
   nodeIds: number[],
   pts: Point2[],
   rect: Rect,
@@ -229,7 +232,7 @@ function clipWay(
   };
   const close = () => {
     if (current !== undefined && current.length >= 2)
-      pieces.push({ wayId, attrs, vertices: current });
+      pieces.push({ wayId, attrs, vertices: current, wayReversed });
     current = undefined;
   };
 
@@ -273,6 +276,7 @@ function clipWay(
         wayId,
         attrs,
         vertices: [gateVertex(p0, i + t0), gateVertex(p1, i + t1)],
+        wayReversed,
       });
     }
   }

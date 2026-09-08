@@ -16,7 +16,7 @@ import {
   computeStats,
   createAssumptionCollector,
 } from "./assumptions.ts";
-import { buildLinks, type LinkLevel } from "./links.ts";
+import { buildLinks, type LinkLevel, type WayLinks } from "./links.ts";
 import { buildOsmGraph } from "./osm-graph.ts";
 import { type CompileContext, runLaterStages } from "./stages.ts";
 import { buildTopology } from "./topology.ts";
@@ -42,6 +42,8 @@ export interface CompileReport {
   stats: CompileStats;
   /** Bridges, tunnels and `layer` per link id (ground-level links omitted); T-07 uses it to skip conflicts between levels. */
   linkLevels: Record<string, LinkLevel>;
+  /** OSM way id -> links in order along the way (forward = node order, backward = against it); for T-17 route relations. */
+  wayLinks: Record<number, WayLinks>;
 }
 
 export type { AssumptionEntry, AssumptionKind, CompileStats } from "./assumptions.ts";
@@ -52,7 +54,7 @@ export {
   LANE_WIDTH_M,
   parseTurnLanes,
 } from "./lanes.ts";
-export type { LinkLevel } from "./links.ts";
+export type { LinkLevel, WayLinks } from "./links.ts";
 export { DEFAULT_SPEED_KPH, parseMaxspeed } from "./speeds.ts";
 export type { CompileContext, CompileStage } from "./stages.ts";
 export { LATER_STAGES } from "./stages.ts";
@@ -119,6 +121,7 @@ export function compileNetwork(opts: CompileOptions): CompileReport {
     graph,
     network,
     linkLevels: built.linkLevels,
+    wayLinks: built.wayLinks,
     assumptions,
     warn,
   };
@@ -136,6 +139,7 @@ export function compileNetwork(opts: CompileOptions): CompileReport {
     warnings,
     stats: computeStats(parsed),
     linkLevels: ctx.linkLevels,
+    wayLinks: ctx.wayLinks,
   };
 }
 

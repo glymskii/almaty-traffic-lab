@@ -2,7 +2,7 @@ import type { Network } from "@atl/contracts";
 import type { Projection } from "../projection.ts";
 import type { AssumptionCollector } from "./assumptions.ts";
 import type { CompileOptions } from "./index.ts";
-import type { LinkLevel } from "./links.ts";
+import type { LinkLevel, WayLinks } from "./links.ts";
 import type { OsmGraph } from "./osm-graph.ts";
 import type { Warn } from "./tags.ts";
 
@@ -14,6 +14,7 @@ export interface CompileContext {
   /** Draft network; validated with parseNetwork + checkNetworkIntegrity after the last stage. */
   network: Network;
   linkLevels: Record<string, LinkLevel>;
+  wayLinks: Record<number, WayLinks>;
   assumptions: AssumptionCollector;
   warn: Warn;
 }
@@ -26,9 +27,11 @@ export interface CompileStage {
 }
 
 /**
- * Stages after topology + lanes (T-02). Each owning task fills in `run` by importing its module here:
- * intersections, connectors, conflicts, crosswalks, gates, attractors, merges (T-07); signal plans (T-08);
- * bus routes and stops (T-17); buildings, parks, water (T-27); scenario overrides (T-24).
+ * Stages after topology + lanes (T-02): intersections, connectors, conflicts, crosswalks, gates,
+ * attractors, merges (T-07); signal plans (T-08); bus routes and stops (T-17); buildings, parks,
+ * water (T-27); scenario overrides (T-24). The owning task wires its stage from `index.ts`
+ * (`LATER_STAGES[i].run = runIntersections`), and the stage module imports `CompileContext` with
+ * `import type` only, so there is no runtime import cycle through this file.
  */
 export const LATER_STAGES: CompileStage[] = [
   { name: "intersections", task: "T-07" },

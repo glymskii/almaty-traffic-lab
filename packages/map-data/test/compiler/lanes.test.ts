@@ -226,6 +226,9 @@ describe("left pockets", () => {
     expect(lanes.map((l) => l.kind)).toEqual(["turn_pocket", "general", "general"]);
     expect(lanes[0]?.startS).toBeCloseTo(approach.lengthM - 60, 0);
     expect(lanes[0]?.provenance).toEqual({ turns: "default", startS: "default" });
+    expect(approach.provenance.laneIds).toBe("default");
+    // The extra lane widens the carriageway: 3 lanes → 5.25 m off the axis instead of 3.5 m.
+    expect(approach.geometry[0]?.[1]).toBeCloseTo(-5.25, 1);
     // leaving the junction: no pocket
     expect(lanesOf(net, linkById(net, "w1_1_f")).map((l) => l.kind)).toEqual([
       "general",
@@ -271,7 +274,7 @@ describe("left pockets", () => {
     );
   });
 
-  it("turns a tagged left-only leftmost lane into a pocket, 40% of short links", () => {
+  it("turns a tagged left-only leftmost lane into a pocket of 40% of a short link", () => {
     const net = compile(
       localSnapshot({ 1: [-150, 0], 2: [0, 0] }, [
         twoWay(1, { highway: "secondary", oneway: "yes", "turn:lanes": "left|through" }, [1, 2]),
@@ -280,8 +283,9 @@ describe("left pockets", () => {
     const link = linkById(net, "w1_0_f");
     const lanes = lanesOf(net, link);
     expect(lanes[0]?.kind).toBe("turn_pocket");
-    expect(lanes[0]?.startS).toBeCloseTo(link.lengthM * 0.4, 0);
+    expect(lanes[0]?.startS).toBeCloseTo(link.lengthM * 0.6, 0);
     expect(lanes[0]?.provenance).toEqual({ turns: "osm", startS: "default" });
+    expect(link.provenance.laneIds).toBe("osm");
   });
 
   it("never turns the only lane into a pocket", () => {

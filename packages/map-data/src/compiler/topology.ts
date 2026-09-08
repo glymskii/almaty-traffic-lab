@@ -36,7 +36,10 @@ export interface TopoVertex {
   osmNodeId?: number;
 }
 
-/** A stretch of one OSM way inside a segment; `reversed` when the segment runs against the way's node order. */
+/**
+ * A stretch of one OSM way inside a segment; `reversed` when the segment runs against the way's
+ * node order (oneway=-1 pieces start out reversed).
+ */
 export interface SegmentPart {
   wayId: number;
   wayPos: number;
@@ -225,7 +228,7 @@ export function buildTopology(graph: OsmGraph, warn: Warn): Topology {
       id,
       vertices: topo,
       attrs: piece.attrs,
-      parts: [{ wayId: piece.wayId, wayPos: first.wayPos, reversed: false }],
+      parts: [{ wayId: piece.wayId, wayPos: first.wayPos, reversed: piece.wayReversed }],
       lengthM,
     });
   };
@@ -350,8 +353,9 @@ export function buildTopology(graph: OsmGraph, warn: Warn): Topology {
     segs.delete(ib);
     segs.set(merged.id, merged);
     incident.delete(key);
-    replaceIncident(segFrom(merged), ia, merged.id);
-    replaceIncident(segTo(merged), ib, merged.id);
+    // `first`/`second` may be b/a after orientPair(b, a): use the segments' own ids.
+    replaceIncident(segFrom(merged), first.id, merged.id);
+    replaceIncident(segTo(merged), second.id, merged.id);
   }
 
   // 4. Orientation and ids: forward = node order of the primary (lowest-id) OSM way.
@@ -409,6 +413,10 @@ export function buildTopology(graph: OsmGraph, warn: Warn): Topology {
     else kind = "bend";
     if (signalized.has(key) && degree === 1)
       warn(`node ${key}: traffic_signals on a dead end; kept as dead_end`);
+    if (kind === "gate" && degree >= 3)
+      warn(
+        `node ${key}: junction exactly on the bbox boundary is treated as a gate; the crossing street is cut there`,
+      );
     const name = nodeName(namesByNode.get(key));
     nodes.push({
       key,
@@ -427,8 +435,13 @@ export function buildTopology(graph: OsmGraph, warn: Warn): Topology {
 /** "A × B": distinct street names, major class first, then alphabetical. */
 function nodeName(entries: { rank: number; name: string }[] | undefined): string | undefined {
   if (entries === undefined || entries.length === 0) return undefined;
-  const sorted = [...entries].sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name, "ru"));
+  // Code-unit order, not localeCompare: the output must not depend on the ICU build of Node.
+  const sorted = [...entries].sort((a, b) => a.rank - b.rank || compareCodeUnits(a.name, b.name));
   const names: string[] = [];
   for (const e of sorted) if (!names.includes(e.name)) names.push(e.name);
   return names.join(" × ");
+}
+
+function compareCodeUnits(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
 }

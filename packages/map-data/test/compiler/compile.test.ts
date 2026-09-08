@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { checkNetworkIntegrity, defaultSimConfig, parseNetwork } from "@atl/contracts";
+import { checkNetworkIntegrity, defaultSimConfig, type Point2, parseNetwork } from "@atl/contracts";
 import { describe, expect, it } from "vitest";
 import { getBBox } from "../../src/bboxes.ts";
 import { compileNetwork } from "../../src/compiler/index.ts";
@@ -124,6 +124,9 @@ describe("compileNetwork on the mini fixture", () => {
     const toCentreFromEast = lanesOf(net, linkById(net, "w101_0_b"));
     expect(toCentreFromEast.map((l) => l.kind)).toEqual(["turn_pocket", "general", "general"]);
     expect(toCentreFromEast[0]?.startS).toBeCloseTo(linkById(net, "w101_0_b").lengthM - 60, 0);
+    // The rule pocket widens the carriageway: three lanes centred on a centreline 5.25 m off the axis.
+    for (const p of linkById(net, "w101_0_b").geometry) expect(p[1]).toBeCloseTo(5.25, 1);
+    for (const p of linkById(net, "w101_0_f").geometry) expect(p[1]).toBeCloseTo(-3.5, 1);
     expect(toCentreFromEast.map((l) => l.turns)).toEqual([
       ["left"],
       ["through"],
@@ -157,6 +160,15 @@ describe("compileNetwork on the mini fixture", () => {
       laneIds: "osm",
     });
     expect(linkById(net, "w101_0_f").provenance).toEqual({ speedLimitKph: "osm", laneIds: "osm" });
+    // A pocket added by rule is one lane more than OSM says.
+    expect(linkById(net, "w101_0_b").provenance).toEqual({
+      speedLimitKph: "osm",
+      laneIds: "default",
+    });
+    expect(linkById(net, "w200_0_f").provenance).toEqual({
+      speedLimitKph: "osm",
+      laneIds: "default",
+    });
     expect(linkById(net, "w301_0_b").provenance).toEqual({
       speedLimitKph: "default",
       laneIds: "default",
@@ -186,7 +198,7 @@ describe("compileNetwork on the mini fixture", () => {
       links: 8,
       lanes: 18,
       speedDefaultShare: 0.5,
-      laneCountDefaultShare: 0.25,
+      laneCountDefaultShare: 0.5,
       busLanes: 2,
       pockets: 3,
     });
@@ -202,6 +214,45 @@ describe("compileNetwork on the mini fixture", () => {
     expect(report.warnings.filter((w) => !w.includes("not implemented"))).toEqual([]);
     expect(report.warnings).toHaveLength(5);
     expect(report.linkLevels).toEqual({});
+  });
+
+  it("maps every OSM way to its links in order along the way", () => {
+    expect(report.wayLinks).toEqual({
+      100: { forward: ["w100_0_f"], backward: ["w100_0_b"] },
+      101: { forward: ["w101_0_f"], backward: ["w101_0_b"] },
+      200: { forward: ["w200_0_f", "w200_1_f"], backward: [] },
+      301: { forward: ["w301_0_f"], backward: ["w301_0_b"] },
+      302: { forward: ["w301_0_f"], backward: ["w301_0_b"] },
+    });
+  });
+
+  it("keeps the lanes of opposite directions on their own side of the way axis", () => {
+    // Lane i of a link is centred (i - (N - 1) / 2) · w to the right of the link geometry
+    // (docs/CONTRACTS.md), so the two directions of a street tile without overlap only when their
+    // geometries are at least (N_f + N_b) · w / 2 apart.
+    const LANE_W = 3.5;
+    const pointToSegment = (p: Point2, a: Point2, b: Point2): number => {
+      const dx = b[0] - a[0];
+      const dy = b[1] - a[1];
+      const l2 = dx * dx + dy * dy;
+      const t =
+        l2 === 0 ? 0 : Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2));
+      return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy));
+    };
+    const separation = (from: Point2[], to: Point2[]): number => {
+      const mid = from[Math.floor(from.length / 2)] ?? from[0] ?? [0, 0];
+      let best = Number.POSITIVE_INFINITY;
+      for (let i = 1; i < to.length; i++)
+        best = Math.min(best, pointToSegment(mid, to[i - 1] ?? [0, 0], to[i] ?? [0, 0]));
+      return best;
+    };
+    for (const base of ["w100_0", "w101_0", "w301_0"]) {
+      const forward = linkById(net, `${base}_f`);
+      const backward = linkById(net, `${base}_b`);
+      const needed = ((forward.laneIds.length + backward.laneIds.length) * LANE_W) / 2;
+      expect(separation(forward.geometry, backward.geometry)).toBeGreaterThanOrEqual(needed - 0.05);
+      expect(separation(backward.geometry, forward.geometry)).toBeGreaterThanOrEqual(needed - 0.05);
+    }
   });
 
   it("is deterministic: two compilations give identical JSON and gzip bytes", () => {
@@ -247,8 +298,6 @@ describe("compileNetwork on the small Almaty snapshot (T-01 output)", () => {
       expect(net.nodes.filter((n) => n.kind === "gate").length).toBeGreaterThan(10);
       expect(net.lanes.filter((l) => l.kind === "bus").length).toBeGreaterThan(0);
       expect(report.stats.speedDefaultShare).toBeGreaterThan(0.3);
-      // Real coverage of maxspeed in the small square is ~34% of ways (T-01 snapshot), so ~66% of links
-      // get a default speed; the card's original "~45%" was a way-count estimate over major roads only.
       expect(report.stats.speedDefaultShare).toBeLessThan(0.9);
       expect(elapsedMs).toBeLessThan(5000);
       const again = compileNetwork({ bbox, snapshot, config, generatedAt: FIXED_TIME }).network;

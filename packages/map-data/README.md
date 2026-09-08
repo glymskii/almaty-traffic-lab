@@ -101,12 +101,19 @@ pnpm run compile --bbox small --snapshot path.json.gz --out out.network.json.gz 
 | 5. Проверка и запись | `index.ts`, `write.ts` | `parseNetwork` + `checkNetworkIntegrity` (ошибка = исключение); `writeCompileOutputs` пишет `<bboxId>.network.json.gz` и `<bboxId>.assumptions.json` |
 
 `CompileReport`: `network`, `assumptions` (счётчики по видам с примером), `warnings` (уникальные строки),
-`stats` (число сущностей, доли `default`), `linkLevels` (`layer`/`bridge`/`tunnel` по id линка; только не на земле).
+`stats` (число сущностей, доли `default`), `linkLevels` (`layer`/`bridge`/`tunnel` по id линка; только не на земле),
+`wayLinks` (`wayId → { forward: linkIds[], backward: linkIds[] }` в порядке вдоль way: `forward` по порядку узлов
+way, `backward` против него; для отношений маршрутов T-17). То же лежит в `CompileContext` для поздних стадий.
 Мосты и туннели не входят в `Network` (контракты заморожены), T-07 берёт их из отчёта; узел создаётся только там,
 где way реально делят OSM-узел, поэтому пересечения на разных уровнях узлов не порождают.
 
+Подключение стадии: владелец задачи присваивает `LATER_STAGES[i].run` в `index.ts` (реестр в `stages.ts` не
+импортирует модули стадий), а модуль стадии берёт `CompileContext` через `import type` — так нет цикла
+рантайм-импортов. Стадия мутирует `ctx.network` и добавляет допущения и предупреждения через `ctx.assumptions`
+и `ctx.warn`; проверка `parseNetwork` + `checkNetworkIntegrity` идёт после последней стадии.
+
 ### Узлы
-Приоритет типов: `gate` (на границе bbox, в том числе OSM-узел ровно на границе) → `signalized` (тег на узле или
+Приоритет типов: `gate` (на границе bbox, в том числе OSM-узел ровно на границе; перекрёсток ровно на границе тоже становится воротами, с предупреждением) → `signalized` (тег на узле или
 светофор в 30 м вдоль той же улицы, степень ≥ 2) → `junction` (степень ≥ 3) → `dead_end` (степень 1) → `bend`
 (оставшиеся узлы степени 2: смена имени, класса, числа полос, скорости, уровня; светофор на тупике остаётся `dead_end`).
 Имя: `name:ru`, иначе `name`; на перекрёстке «A × B» по именам линков, сначала старший класс, потом по алфавиту.
@@ -125,10 +132,10 @@ pnpm run compile --bbox small --snapshot path.json.gz --out out.network.json.gz 
 | Полос на направление | `lanes:forward/backward`; иначе `lanes` (oneway — все, либо минус устаревший `lanes:backward`; двусторонняя — минус явный тег другого направления, иначе по числу элементов `turn:lanes:<dir>`, иначе пополам, нечётное — большая половина в forward); иначе число элементов `turn:lanes` или `bus:lanes` | trunk 3, primary 3, secondary 2, tertiary 2, residential 1, unclassified 1, living_street 1, все `*_link` 1 |
 | Скорость, км/ч | `maxspeed:<dir>`, `maxspeed`: число, `N mph`, `RU:urban`/`KZ:urban` = 60, `*:living_street` = 20, `*:rural` = 90, `walk` = 5; `none`/`signals` → предупреждение и дефолт | trunk 80, primary/secondary/tertiary 60, residential/unclassified 40, living_street 20, trunk_link 60, остальные `*_link` 40 |
 | Повороты полос | `turn:lanes(:forward/backward)`: `slight_*`/`sharp_*` → `left`/`right`, `reverse` → `uturn`, `merge_to_*` → `merge`, `none`/пусто → `through`; число элементов должно совпадать с числом полос: на oneway при противоречии с `lanes` верим `turn:lanes` (предупреждение), на двусторонней тег игнорируется с предупреждением; `turn:lanes` без направления на двусторонней улице игнорируется | 1 полоса `[left, through, right]`; 2 — `[left, through] [through, right]`; ≥ 3 — `[left, through] [through]… [through, right]` |
-| Левый карман | Крайняя левая по `turn:lanes` только `left` (и полос ≥ 2) ⇒ `turn_pocket`, `startS = L − 80` (при `L < 200` — `0,4·L`), `provenance.startS = default` | Без тега: подход к `signalized` узлу, ≥ 2 общих полос, класс trunk/primary/secondary, `L ≥ 120` ⇒ добавляется полоса-карман 60 м с `turns: [left]`, крайняя левая общая полоса теряет `left` |
+| Левый карман | Крайняя левая по `turn:lanes` только `left` (и полос ≥ 2) ⇒ `turn_pocket` длиной 80 м (`startS = L − 80`; при `L < 200` карман 40 % длины, `startS = 0,6·L`), `provenance.startS = default` | Без тега: подход к `signalized` узлу, ≥ 2 общих полос, класс trunk/primary/secondary, `L ≥ 120` ⇒ добавляется полоса-карман 60 м с `turns: [left]`, крайняя левая общая полоса теряет `left`, у линка `provenance.laneIds = default` (полос больше, чем в OSM) |
 | Выделенка | `bus:lanes`/`psv:lanes` с `designated` (не крайняя правая → предупреждение, моделируется как крайняя правая), `lanes:bus`/`lanes:psv` ≥ 1 (без направления на двусторонней улице — поровну на оба направления), `busway=lane|yes`, `busway:both`, `busway:right` (forward), `busway:left` (backward; на oneway — предупреждение). Крайняя правая: `kind: bus`, `allowed: [bus, trolleybus]`, `busLane.carsMayEnterForRightTurnWithinM: 50` | Часы `0..1440` (`busLaneHours: default`). Если число полос дефолтное или равно 1, выделенка добавляется сверху, а не забирает общую полосу |
 
-Ширина полосы 3,5 м; `lengthM` = длина смещённой геометрии; координаты и длины округлены до сантиметра.
+Ширина полосы 3,5 м; смещение осевой считается по итоговому числу полос (включая карман по правилу), чтобы все `N = laneIds.length` полос, центрированные на геометрии по конвенции `docs/CONTRACTS.md`, лежали на своей стороне оси way; `lengthM` = длина смещённой геометрии; координаты и длины округлены до сантиметра.
 
 ### Отчёт допущений
 `assumptions[].kind` (счётчик — линки для атрибутов линка, полосы для атрибутов полосы; `example` — первый id):
