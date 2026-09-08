@@ -189,7 +189,16 @@ export const useStore = create<StoreState>()((set, get) => ({
   setActiveTab: (tab) => set({ activeTab: tab }),
 
   setNetworkKey: (key) => {
-    set({ networkKey: key, restartToken: get().restartToken + 1 });
+    // Switching networks always remounts Viewport (a fresh network load), so fold any pending
+    // restart-required draft in the same way applyTimePreset/restart() do - otherwise a vehicle
+    // budget/taxi-lane change the user made but hadn't applied yet would be silently dropped by
+    // the remount, and ParamsPanel would still show "Применить и перезапустить" as if nothing had
+    // just restarted.
+    set({
+      networkKey: key,
+      appliedRestartParams: get().draftRestartParams,
+      restartToken: get().restartToken + 1,
+    });
   },
 
   applyTimePreset: (preset) => {

@@ -38,3 +38,13 @@
 - В `apps/web/src/i18n/ru.ts` появятся пять новых видов допущений от компилятора светофоров, которым нужны
   переводы: `signal_plan_default`, `left_turn_protected_default`, `left_turn_protected_permissive_default`,
   `left_turn_permissive_default`, `left_turn_prohibited_default`.
+
+## Заметки из ревью T-23 (учесть)
+- `useStore((s) => s.report)` (`apps/web/src/state/store.ts`) уже содержит свежий `BottleneckReport` — обновляется
+  раз в `REPORT_POLL_INTERVAL_MS` (3с) через `sim.requestReport()`/`sim.onReport`. Для вкладки «Узкие места» читай
+  `report.items` напрямую вместо новой подписки на `onReport`.
+- Вкладка «Узкие места» сейчас заглушка в `apps/web/src/ui/App.tsx` (см. `STUB_TASK_ID`) — замени её содержимое;
+  навигация по вкладкам (`activeTab`/`setActiveTab` в сторе) уже рабочая, ничего в ней менять не нужно.
+- `SimHandle.onMetrics` (`apps/web/src/sim/client.ts`) расширен в T-23, но пока никем не используется (HUD читает
+  только `latestFrameMeta()`/`onReport`) — может пригодиться для тепловой карты по сегментам, если `MetricsFrame`
+  несёт нужную гранулярность.

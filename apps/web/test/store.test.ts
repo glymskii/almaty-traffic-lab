@@ -118,4 +118,15 @@ describe("useStore actions", () => {
     expect(state.networkKey).toBe("big");
     expect(state.restartToken).toBe(tokenBefore + 1);
   });
+
+  it("setNetworkKey also applies a pending restart-required draft, like applyTimePreset/restart() do", () => {
+    // Regression: the network switch remounts Viewport (a fresh load) same as the other two
+    // restart paths, so a vehicle-budget/taxi-lane edit still sitting in the draft must not be
+    // silently dropped by it, and the "needs restart" badge must not stay lit afterwards.
+    useStore.getState().setDraftRestartParam("vehicleBudget", 5000);
+    useStore.getState().setNetworkKey("big");
+    const state = useStore.getState();
+    expect(state.appliedRestartParams.vehicleBudget).toBe(5000);
+    expect(needsRestart(state.appliedRestartParams, state.draftRestartParams)).toBe(false);
+  });
 });
