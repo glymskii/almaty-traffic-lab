@@ -24,6 +24,7 @@ import { idmAcceleration, idmFreeAcceleration } from "./models/idm.ts";
 import { Rng } from "./rng.ts";
 import { SimClock } from "./runtime/clock.ts";
 import { CLASS_COUNT, RuntimeNetwork } from "./runtime/network.ts";
+import { SignalRuntime } from "./runtime/signals.ts";
 import { TrajectoryHash } from "./runtime/trajectory-hash.ts";
 import { VehiclePool } from "./runtime/vehicles.ts";
 
@@ -119,6 +120,14 @@ export interface SimulationKernel {
    * conflicts (T-11) and pedestrians (T-15); the kernel only reads it.
    */
   readonly entryBlockedCause: Uint8Array;
+  /**
+   * Per track: 1 when `entryBlockedCause` is a main signal group currently YELLOW, meaning the block
+   * is conditional (the dilemma-zone rule in `computeAccelerations` may ignore it for a vehicle that
+   * cannot stop comfortably), 0 for every other reason (RED, RED_YELLOW, arrow_off, or unset).
+   */
+  readonly entryBlockedYellow: Uint8Array;
+  /** Precomputed signal-group state machine (T-09); see `runtime/signals.ts`. */
+  readonly signals: SignalRuntime;
 }
 
 export function kernelOf(sim: Simulation): SimulationKernel {
@@ -131,6 +140,8 @@ export function kernelOf(sim: Simulation): SimulationKernel {
       return sim.droppedVehicles;
     },
     entryBlockedCause: sim.entryBlockedCause,
+    entryBlockedYellow: sim.entryBlockedYellow,
+    signals: sim.signals,
   };
 }
 
@@ -141,11 +152,18 @@ export function kernelOf(sim: Simulation): SimulationKernel {
 const CAUSE_FREE_FLOW = causeCode("free_flow");
 const CAUSE_SPEED_LIMIT = causeCode("speed_limit");
 const CAUSE_LEADER = causeCode("leader");
+const CAUSE_SIGNAL_RED = causeCode("signal_red");
+const CAUSE_ARROW_OFF = causeCode("arrow_off");
 
 /** A vehicle cruising at or above this fraction of its desired speed reports `speed_limit`. */
 const CRUISE_SPEED_RATIO = 0.95;
 /** The leader is the binding constraint when it costs at least this much acceleration, m/s^2. */
 const LEADER_BINDING_MPS2 = 0.1;
+/**
+ * Yellow dilemma zone (T-09): a vehicle that cannot stop before the stop line at a deceleration at or
+ * below `comfortDecel * YELLOW_DILEMMA_FACTOR` proceeds instead of braking hard for a stale green.
+ */
+const YELLOW_DILEMMA_FACTOR = 1.5;
 /** A vehicle without a leader on its track looks this far (metres) into the following tracks. */
 const LOOKAHEAD_HORIZON_M = 250;
 /** Arrivals wait at a gate for at most this much demand (seconds of the current rate) before they are discarded. */
@@ -173,6 +191,7 @@ class SimulationImpl implements Simulation {
   readonly scenarioId: string;
   readonly runtime: RuntimeNetwork;
   readonly pool: VehiclePool;
+  readonly signals: SignalRuntime;
 
   private cfg: SimConfig;
   private readonly clock: SimClock;
@@ -195,6 +214,8 @@ class SimulationImpl implements Simulation {
 
   /** See SimulationKernel.entryBlockedCause. */
   readonly entryBlockedCause: Uint8Array;
+  /** See SimulationKernel.entryBlockedYellow. */
+  readonly entryBlockedYellow: Uint8Array;
   /** See SimulationKernel.droppedVehicles. */
   droppedVehicles = 0;
 
@@ -214,6 +235,11 @@ class SimulationImpl implements Simulation {
     this.scenarioId = opts.scenarioId ?? "baseline";
     this.runtime = new RuntimeNetwork(opts.network, opts.config.metrics.segmentLengthM);
     this.pool = new VehiclePool(opts.config.demand.vehicleBudget, this.runtime.trackCount);
+    this.signals = new SignalRuntime(
+      opts.network.signalControllers,
+      opts.config.dtS,
+      opts.config.signals,
+    );
     this.clock = new SimClock(opts.config.dtS, opts.config.startTimeMin);
     const master = new Rng(opts.config.seed);
     this.spawnRng = master.fork(RNG_FORK_SPAWN);
@@ -229,6 +255,9 @@ class SimulationImpl implements Simulation {
     this.warmupEndS = demand.warmupMinutes * 60;
 
     this.entryBlockedCause = new Uint8Array(this.runtime.trackCount);
+    this.entryBlockedYellow = new Uint8Array(this.runtime.trackCount);
+    // Signals at t=0, so writeFrame()/kernelOf() are correct even before the first step().
+    this.updateSignals(0);
 
     const gateCount = this.runtime.gateCount;
     this.gateBudget = new Float64Array(gateCount);
@@ -260,7 +289,8 @@ class SimulationImpl implements Simulation {
     this.clock.advance();
     const dt = this.clock.dtS;
     const now = this.clock.simTimeS;
-    // 1-5 (signals, pedestrians, routing, lane selection, lane changes): later tasks.
+    this.updateSignals(now); // 1
+    // 2-5 (pedestrians, routing, lane selection, lane changes): later tasks.
     this.computeAccelerations(); // 6
     this.integrate(dt, now); // 7
     this.repairOrder();
@@ -274,11 +304,56 @@ class SimulationImpl implements Simulation {
   }
 
   /**
+   * Signals (ARCHITECTURE, step 1). Computes every group's state for `now` and turns it into
+   * `entryBlockedCause`/`entryBlockedYellow` for every signalized connector, which the stop-line
+   * obstacle in `computeAccelerations` reads. GREEN/FLASHING_GREEN clears the block; a main group's
+   * YELLOW sets a conditional block (`entryBlockedYellow = 1`, resolved per vehicle); RED, RED_YELLOW
+   * and an arrow group anywhere outside its own green set an unconditional block (`signal_red` /
+   * `arrow_off`). Unsignalized connectors (`connSignalGroup < 0`) are left untouched for T-11/T-15.
+   */
+  private updateSignals(now: number): void {
+    const signals = this.signals;
+    if (signals.groupCount === 0) return;
+    const groupState = signals.computeStates(now);
+    const rt = this.runtime;
+    const groupIsArrow = rt.groupIsArrow;
+    const connGroup = rt.connSignalGroup;
+    const entryBlocked = this.entryBlockedCause;
+    const entryYellow = this.entryBlockedYellow;
+    for (let t = rt.laneCount; t < rt.trackCount; t++) {
+      const g = connGroup[t] as number;
+      if (g < 0) continue;
+      const state = groupState[g] as number;
+      const isArrow = (groupIsArrow[g] as number) === 1;
+      if (state === SignalState.GREEN || state === SignalState.FLASHING_GREEN) {
+        entryBlocked[t] = 0;
+        entryYellow[t] = 0;
+      } else if (!isArrow && state === SignalState.YELLOW) {
+        entryBlocked[t] = CAUSE_SIGNAL_RED;
+        entryYellow[t] = 1;
+      } else {
+        entryBlocked[t] = isArrow ? CAUSE_ARROW_OFF : CAUSE_SIGNAL_RED;
+        entryYellow[t] = 0;
+      }
+    }
+  }
+
+  /** True when a vehicle at speed `v`, `gap` metres from the stop line, must stop for a yellow light:
+   * it can still do so at a deceleration at or below `comfortDecel * YELLOW_DILEMMA_FACTOR`. */
+  private mustStopAtYellow(v: number, gap: number, comfortDecel: number): boolean {
+    if (v <= 0) return true;
+    if (gap <= 0) return true;
+    const requiredDecel = (v * v) / (2 * gap);
+    return requiredDecel <= comfortDecel * YELLOW_DILEMMA_FACTOR;
+  }
+
+  /**
    * Longitudinal model (ARCHITECTURE, step 6). Every vehicle starts from its free-road IDM
    * acceleration and then takes the minimum over its obstacles; the obstacle that wins becomes the
    * binding constraint (`cause`). Obstacles today: the leader (on this track or the first vehicle on
    * the tracks ahead) and a stop line at the end of the track when entering the next track is blocked
-   * (`entryBlockedCause`, filled by later subsystems). Later tasks add obstacles to this loop.
+   * (`entryBlockedCause`, filled by signals above; later subsystems add more reasons). Later tasks add
+   * obstacles to this loop.
    */
   private computeAccelerations(): void {
     const pool = this.pool;
@@ -298,6 +373,7 @@ class SimulationImpl implements Simulation {
     const trackSpeed = rt.trackSpeedMps;
     const trackNext = rt.trackNextByClass;
     const entryBlocked = this.entryBlockedCause;
+    const entryYellow = this.entryBlockedYellow;
     const n = pool.highWater;
     for (let i = 0; i < n; i++) {
       const t = track[i] as number;
@@ -347,9 +423,14 @@ class SimulationImpl implements Simulation {
       // Obstacle: stop line at the end of this track while entering the next track is blocked.
       const next = nextTrack[i] as number;
       if (next >= 0) {
-        const blocked = entryBlocked[next] as number;
+        let blocked = entryBlocked[next] as number;
+        const gapToLine = (trackEnd[t] as number) - si;
+        if (blocked !== 0 && entryYellow[next] === 1) {
+          // Yellow dilemma zone: a vehicle that cannot stop comfortably proceeds instead.
+          if (!this.mustStopAtYellow(vi, gapToLine, pool.comfortDecel[i] as number)) blocked = 0;
+        }
         if (blocked !== 0) {
-          const aStop = this.accelTowardObstacle(i, vi, v0, (trackEnd[t] as number) - si, 0);
+          const aStop = this.accelTowardObstacle(i, vi, v0, gapToLine, 0);
           if (aStop < acc) {
             acc = aStop;
             if (aFree - aStop >= LEADER_BINDING_MPS2) c = blocked;
@@ -702,8 +783,7 @@ class SimulationImpl implements Simulation {
     }
     frame.count = out;
     frame.simTimeS = this.clock.simTimeS;
-    // Signals are not simulated yet (T-09): report every group as OFF rather than pretending a colour.
-    frame.signalStates.fill(SignalState.OFF);
+    frame.signalStates.set(this.signals.groupState);
     frame.crosswalkPeds.fill(0);
     return frame;
   }

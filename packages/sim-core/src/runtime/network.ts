@@ -24,6 +24,14 @@ export const NodeKindCode = {
   bend: 5,
 } as const;
 
+/** Connector.protection, see contracts/src/network.ts for the semantics of each. */
+export const ProtectionCode = {
+  protected: 0,
+  permissive: 1,
+  yield: 2,
+  priority: 3,
+} as const;
+
 /** Tolerance when deciding that a lane reaches the end of its link (metres). */
 const LANE_END_EPS_M = 0.5;
 
@@ -156,7 +164,17 @@ export class RuntimeNetwork {
 
   // ---- signal groups and crosswalks (global order used by frames) ----
   readonly signalGroupIds: string[];
+  /** groupId -> index into signalGroupIds (same order); built once, shared with runtime/signals.ts. */
+  readonly signalGroupIndex: Map<string, number>;
+  /** Global group index -> 1 when the group's section is arrow_left/arrow_right, else 0 (main). */
+  readonly groupIsArrow: Uint8Array;
   readonly crosswalkIds: string[];
+
+  // ---- connector signal wiring (track-indexed; meaningless/0 for lanes) ----
+  /** Connector's signal group (global index into signalGroupIds), or -1 when unsignalized. */
+  readonly connSignalGroup: Int32Array;
+  /** Connector's Protection, see ProtectionCode. */
+  readonly connProtection: Uint8Array;
 
   constructor(net: Network, segmentLengthM: number) {
     // ---- ids ----
@@ -478,10 +496,34 @@ export class RuntimeNetwork {
 
     // ---- signal groups and crosswalks ----
     this.signalGroupIds = [];
+    this.signalGroupIndex = new Map();
+    const groupIsArrow: number[] = [];
     for (const ctrl of net.signalControllers) {
-      for (const g of ctrl.groups) this.signalGroupIds.push(g.id);
+      for (const g of ctrl.groups) {
+        this.signalGroupIndex.set(g.id, this.signalGroupIds.length);
+        this.signalGroupIds.push(g.id);
+        groupIsArrow.push(g.section === "main" ? 0 : 1);
+      }
     }
+    this.groupIsArrow = Uint8Array.from(groupIsArrow);
     this.crosswalkIds = net.crosswalks.map((c) => c.id);
+
+    // ---- connector signal wiring ----
+    this.connSignalGroup = new Int32Array(trackCount).fill(-1);
+    this.connProtection = new Uint8Array(trackCount);
+    for (let c = 0; c < connectorCount; c++) {
+      const conn = net.connectors[c];
+      if (!conn) continue;
+      const t = laneCount + c;
+      this.connProtection[t] = ProtectionCode[conn.protection];
+      if (conn.signalGroupId !== undefined) {
+        this.connSignalGroup[t] = mustIndex(
+          this.signalGroupIndex,
+          conn.signalGroupId,
+          "signal group",
+        );
+      }
+    }
   }
 
   /** True when lanes `a` and `b` (same link) both exist at coordinate `s`. */
