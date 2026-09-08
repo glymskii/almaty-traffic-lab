@@ -9,7 +9,7 @@ const GZIP_MAGIC_1 = 0x8b;
  * by scripts/copy-networks.mjs, see docs/PLAN.md T-02), falling back to the built-in demo network
  * when it isn't there - T-02's output isn't required to work on apps/web.
  *
- * "Isn't there" is checked by the gzip magic number, not just HTTP status: Vite's dev server (and
+ * "Isn't there" is checked by the body (gzip magic or a JSON object), not just HTTP status: Vite's dev server (and
  * many static hosts configured for SPA routing) answer an unmatched path with a 200 and
  * `index.html` instead of a 404, so `response.ok` alone would happily try to decompress a web
  * page. A response that *is* real gzip but still fails to decode or validate is a genuine bug and
@@ -28,11 +28,24 @@ export async function loadNetwork(networkId = DEFAULT_NETWORK_ID): Promise<Netwo
   if (!response.ok) return createDemoNetwork();
 
   const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes.length < 2 || bytes[0] !== GZIP_MAGIC_0 || bytes[1] !== GZIP_MAGIC_1) {
-    return createDemoNetwork();
+  if (bytes.length >= 2 && bytes[0] === GZIP_MAGIC_0 && bytes[1] === GZIP_MAGIC_1) {
+    const decompressed = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+    return parseNetwork(await new Response(decompressed).json());
   }
+  // Some servers (Vite dev, some static hosts) send .gz files with Content-Encoding: gzip, so the
+  // browser has already inflated the body and we receive plain JSON. Anything else (an HTML SPA
+  // fallback page) means the file is not there.
+  const first = firstNonWhitespace(bytes);
+  if (first === 0x7b /* { */) {
+    return parseNetwork(JSON.parse(new TextDecoder().decode(bytes)));
+  }
+  return createDemoNetwork();
+}
 
-  const decompressed = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
-  const json = await new Response(decompressed).json();
-  return parseNetwork(json);
+function firstNonWhitespace(bytes: Uint8Array): number {
+  for (let i = 0; i < Math.min(bytes.length, 64); i++) {
+    const b = bytes[i] ?? 0;
+    if (b !== 0x20 && b !== 0x0a && b !== 0x0d && b !== 0x09) return b;
+  }
+  return -1;
 }
