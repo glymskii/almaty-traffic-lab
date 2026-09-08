@@ -20,6 +20,7 @@ function fakeViewport(network: Network): ViewportHandle {
     network,
     engine: {} as ViewportHandle["engine"],
     rig: {} as ViewportHandle["rig"],
+    cityLayers: {} as ViewportHandle["cityLayers"],
     getSim: () => undefined,
     onSimReady: () => () => {},
   };
