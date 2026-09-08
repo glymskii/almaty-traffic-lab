@@ -35,3 +35,7 @@
 
 ## Вне объёма
 UI-панели (T-23), тепловая карта (T-25), здания (T-27).
+
+## Заметки от T-06 (учесть)
+- Временная страница `apps/web/src/DebugWorkerView.tsx` и проверка `?debug=worker` в `App.tsx` удаляются в этой задаче.
+- Воркер поддерживает `?sim=stub` в URL для заглушки-симуляции (`createStubSimulation` из `@atl/sim-worker`).

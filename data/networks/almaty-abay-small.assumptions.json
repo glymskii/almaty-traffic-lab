@@ -1,0 +1,188 @@
+{
+  "networkId": "almaty-abay-small",
+  "bboxId": "almaty-abay-small",
+  "generatedAt": "2026-09-08T00:40:36.197Z",
+  "sourceHash": "d5fc7e09aa103f3b6b5bd85d1b21c71d6f03c0b3c7e76f3a1e5b3ce0377b16ef",
+  "stats": {
+    "nodes": 451,
+    "links": 903,
+    "lanes": 1698,
+    "nodesByKind": {
+      "junction": 216,
+      "signalized": 70,
+      "merge": 0,
+      "gate": 56,
+      "dead_end": 36,
+      "bend": 73
+    },
+    "speedDefaultShare": 0.663,
+    "laneCountDefaultShare": 0.357,
+    "turnsDefaultShare": 0.922,
+    "busLanes": 96,
+    "pockets": 71,
+    "totalLengthKm": 112.8
+  },
+  "assumptions": [
+    {
+      "kind": "speed_limit_default",
+      "count": 599,
+      "example": "w22576030_0_f (улица Шевченко)"
+    },
+    {
+      "kind": "lane_count_default",
+      "count": 322,
+      "example": "w22576030_0_f (улица Шевченко)"
+    },
+    {
+      "kind": "turns_default",
+      "count": 1566,
+      "example": "w22576030_0_f:0"
+    },
+    {
+      "kind": "left_pocket_default",
+      "count": 40,
+      "example": "w23978205_0_b:0"
+    },
+    {
+      "kind": "pocket_length_default",
+      "count": 31,
+      "example": "w23444306_0_b:0"
+    },
+    {
+      "kind": "bus_lane_hours_default",
+      "count": 96,
+      "example": "w24042613_0_b:1"
+    },
+    {
+      "kind": "bus_lane_position_assumed",
+      "count": 1,
+      "example": "w692910574_0_f:3"
+    }
+  ],
+  "warnings": [
+    "way 124841590: lanes=3 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 333558546: lanes=3 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 334057429: lanes=3 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 446405100: lanes=3 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 539985267: lanes=3 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 539985272: lanes=1 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 539985282: turn:lanes has 3 entries but the forward direction has 2 lanes; turn:lanes ignored",
+    "way 615943293: the only lane backward is a bus lane; adding a general lane (default)",
+    "way 692910574: bus:lanes designates lane 1 of 4 (not the rightmost); modelled as the rightmost lane",
+    "way 692910574: the only lane backward is a bus lane; adding a general lane (default)",
+    "way 692910574: turn:lanes has 1 entries but the backward direction has 2 lanes; turn:lanes ignored",
+    "way 693656421: lanes=2 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 693656423: lanes=3 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 693656426: lanes=3 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 693656427: lanes=3 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 693656431: lanes=2 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 751465279: lanes=3 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 1044674826: lanes=3 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 1191575348: lanes:psv=1 on a two-way street without direction; assuming a bus lane in both directions",
+    "way 1191575348: the only lane backward is a bus lane; adding a general lane (default)",
+    "way 1361117795: turn:lanes has 3 entries but the forward direction has 2 lanes; turn:lanes ignored",
+    "way 1380159112: lanes=3 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 1380159113: lanes=3 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 1409697571: turn:lanes has 3 entries but the forward direction has 2 lanes; turn:lanes ignored",
+    "way 1419680688: lanes=2 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 1422516723: lanes=1 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 1422516725: lanes=2 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 1428240092: bus:lanes designates 2 lanes; only one bus lane per direction is modelled",
+    "way 1458313378: lanes:psv=1 on a two-way street without direction; assuming a bus lane in both directions",
+    "way 1458313378: the only lane forward is a bus lane; adding a general lane (default)",
+    "way 1522660681: lanes=2 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes",
+    "way 1533842999: turn:lanes has 3 entries but the forward direction has 2 lanes; turn:lanes ignored",
+    "stage \"intersections\" (T-07) is not implemented yet; skipped",
+    "stage \"signals\" (T-08) is not implemented yet; skipped",
+    "stage \"transit\" (T-17) is not implemented yet; skipped",
+    "stage \"city\" (T-27) is not implemented yet; skipped",
+    "stage \"overrides\" (T-24) is not implemented yet; skipped"
+  ],
+  "linkLevels": {
+    "w24042613_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w24042613_0_b": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w30812513_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w30908770_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w48795298_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w48795298_0_b": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w48795301_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w48795302_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w125617974_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": true
+    },
+    "w125617974_0_b": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": true
+    },
+    "w208514983_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w208514983_0_b": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w630928093_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w1326103717_0_f": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w1326103717_0_b": {
+      "layer": 1,
+      "bridge": true,
+      "tunnel": false
+    },
+    "w1410828917_0_f": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": false
+    },
+    "w1410828917_0_b": {
+      "layer": -1,
+      "bridge": false,
+      "tunnel": false
+    }
+  }
+}

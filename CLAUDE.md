@@ -24,8 +24,8 @@
 pnpm check                 # typecheck + lint + determinism + tests. Definition of Done каждой задачи
 pnpm test:watch            # vitest в watch-режиме
 pnpm format                # Biome
-pnpm import --bbox small   # OSM → data/osm/<bboxId>/ (T-01)
-pnpm compile --bbox small  # snapshot → data/networks/<bboxId>.network.json.gz (T-02+)
+pnpm run import --bbox small   # OSM → data/osm/<bboxId>/ (T-01); именно `run`: `pnpm import` — встроенная команда pnpm
+pnpm run compile --bbox small  # snapshot → data/networks/<bboxId>.network.json.gz (T-02+)
 pnpm sim --network ... --minutes 10 --seed 1   # headless-раннер (T-20)
 pnpm dev                   # Vite dev server
 ```

@@ -18,8 +18,8 @@
 ```bash
 pnpm install
 pnpm check          # typecheck + lint + determinism + tests: Definition of Done любой задачи
-pnpm import --bbox small|big
-pnpm compile --bbox small|big
+pnpm run import --bbox small|big
+pnpm run compile --bbox small|big
 pnpm sim --network data/networks/<id>.network.json.gz --minutes 10 --seed 1
 pnpm dev
 ```

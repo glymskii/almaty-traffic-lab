@@ -1,5 +1,5 @@
-import { ru } from "./i18n/ru.ts";
 import { DebugWorkerView } from "./DebugWorkerView.tsx";
+import { ru } from "./i18n/ru.ts";
 import { Viewport } from "./Viewport.tsx";
 
 /**

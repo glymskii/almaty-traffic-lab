@@ -7,4 +7,4 @@
 - `golden/` — эталонные `RunSummary` для регрессии (T-20).
 
 Пресеты bbox: `packages/map-data/src/bboxes.ts` (`small`, `big`). Несжатые `.json` в `osm/` игнорируются git.
-Данные © OpenStreetMap contributors, ODbL. Снимок воспроизводим командой `pnpm import --bbox <key> --refresh`.
+Данные © OpenStreetMap contributors, ODbL. Снимок воспроизводим командой `pnpm run import --bbox <key> --refresh`.

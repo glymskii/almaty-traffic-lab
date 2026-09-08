@@ -165,9 +165,10 @@ describe("sim-worker protocol", () => {
   });
 
   it("allows dispose after a fatal error without throwing", async () => {
-    // No createSimulation override: falls back to @atl/sim-core's not-yet-implemented factory,
-    // which throws synchronously and is caught by worker-main as a fatal error.
-    const worker = createFakeWorker();
+    // A factory that throws synchronously is caught by worker-main and reported as a fatal error.
+    const worker = createFakeWorker(() => {
+      throw new Error("simulation factory failed");
+    });
     const client = createSimClient({ createWorker: () => worker });
     const { network, config, scenario } = testSetup();
 

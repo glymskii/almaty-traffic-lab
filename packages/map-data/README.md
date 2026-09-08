@@ -7,12 +7,12 @@
 
 ## Импортёр (`src/importer/`)
 
-`pnpm import --bbox small|big` — тайловый импорт данных Overpass для пресета bbox
+`pnpm run import --bbox small|big` — тайловый импорт данных Overpass для пресета bbox
 (`src/bboxes.ts`) в `data/osm/<bboxId>/`. Приложение и тесты в сеть не ходят: единственный
 вход дальше по пайплайну — закоммиченный `snapshot.json.gz`.
 
-> Важно: `import` — зарезервированное имя команды в самом pnpm (`pnpm import` генерирует
-> `pnpm-lock.yaml` из чужого лок-файла), поэтому короткая форма `pnpm import ...` не доходит
+> Важно: `import` — зарезервированное имя команды в самом pnpm (`pnpm run import` генерирует
+> `pnpm-lock.yaml` из чужого лок-файла), поэтому короткая форма `pnpm run import ...` не доходит
 > до нашего скрипта. Явная форма всегда работает: `pnpm run import --bbox small` из корня,
 > или `pnpm --filter @atl/map-data run import --bbox small`.
 
@@ -73,9 +73,9 @@ gzip round-trip и побайтовая стабильность сжатия, �
 пояснения: `docs/CONTRACTS.md`.
 
 ```bash
-pnpm import --bbox small|big [--refresh]      # OSM → data/osm/<bboxId>/snapshot.json.gz (T-01)
-pnpm compile --bbox small|big                 # snapshot → data/networks/<bboxId>.network.json.gz
-pnpm compile --bbox small --snapshot path.json.gz --out out.network.json.gz --generated-at 2026-01-01T00:00:00Z
+pnpm run import --bbox small|big [--refresh]      # OSM → data/osm/<bboxId>/snapshot.json.gz (T-01)
+pnpm run compile --bbox small|big                 # snapshot → data/networks/<bboxId>.network.json.gz
+pnpm run compile --bbox small --snapshot path.json.gz --out out.network.json.gz --generated-at 2026-01-01T00:00:00Z
 ```
 
 Пресеты bbox: `src/bboxes.ts` (`small` — тестовый квадрат, `big` — весь центр). Проекция: `src/projection.ts`
