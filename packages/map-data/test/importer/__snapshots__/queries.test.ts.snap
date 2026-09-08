@@ -1,0 +1,68 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`buildOverpassQuery > renders a stable "buildings" query 1`] = `
+"[out:json][timeout:180];
+(
+  way[building](43.222,76.898,43.244,76.938);
+  relation[building][type=multipolygon](43.222,76.898,43.244,76.938);
+);
+out geom;
+"
+`;
+
+exports[`buildOverpassQuery > renders a stable "landuse" query 1`] = `
+"[out:json][timeout:180];
+(
+  way[leisure=park](43.222,76.898,43.244,76.938);
+  relation[leisure=park](43.222,76.898,43.244,76.938);
+  way[natural=water](43.222,76.898,43.244,76.938);
+  relation[natural=water](43.222,76.898,43.244,76.938);
+  way[landuse=grass](43.222,76.898,43.244,76.938);
+  relation[landuse=grass](43.222,76.898,43.244,76.938);
+  way[waterway~"^(river|stream|canal)$"](43.222,76.898,43.244,76.938);
+  relation[waterway~"^(river|stream|canal)$"](43.222,76.898,43.244,76.938);
+);
+out geom;
+"
+`;
+
+exports[`buildOverpassQuery > renders a stable "pois" query 1`] = `
+"[out:json][timeout:180];
+(
+  node[shop=mall](43.222,76.898,43.244,76.938);
+  way[shop=mall](43.222,76.898,43.244,76.938);
+  node[amenity~"^(university|college|hospital|theatre|cinema)$"](43.222,76.898,43.244,76.938);
+  way[amenity~"^(university|college|hospital|theatre|cinema)$"](43.222,76.898,43.244,76.938);
+  node[leisure=stadium](43.222,76.898,43.244,76.938);
+  way[leisure=stadium](43.222,76.898,43.244,76.938);
+  node[office](43.222,76.898,43.244,76.938);
+  way[office](43.222,76.898,43.244,76.938);
+  node[railway=station](43.222,76.898,43.244,76.938);
+  way[railway=station](43.222,76.898,43.244,76.938);
+  node[public_transport=station](43.222,76.898,43.244,76.938);
+  way[public_transport=station](43.222,76.898,43.244,76.938);
+);
+out center;
+"
+`;
+
+exports[`buildOverpassQuery > renders a stable "roads" query 1`] = `
+"[out:json][timeout:180];
+(
+  way[highway~"^(trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|residential|unclassified|living_street)$"](43.222,76.898,43.244,76.938);
+  node[highway~"^(traffic_signals|crossing|stop|give_way)$"](43.222,76.898,43.244,76.938);
+);
+out geom;
+"
+`;
+
+exports[`buildOverpassQuery > renders a stable "transit" query 1`] = `
+"[out:json][timeout:180];
+(
+  relation[type=route][route~"^(bus|trolleybus)$"](43.222,76.898,43.244,76.938);
+  node[highway=bus_stop](43.222,76.898,43.244,76.938);
+  node[public_transport=platform][bus=yes](43.222,76.898,43.244,76.938);
+);
+out body;
+"
+`;

@@ -17,7 +17,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "sim": "pnpm --filter @atl/sim-core sim",
-    "import": "pnpm --filter @atl/map-data import",
+    "import": "pnpm --filter @atl/map-data run import",
     "compile": "pnpm --filter @atl/map-data compile",
     "dev": "pnpm --filter @atl/web dev",
     "build": "pnpm --filter @atl/web build"

@@ -1,0 +1,22 @@
+{
+  "version": 0.6,
+  "generator": "Overpass API test fixture",
+  "osm3s": { "timestamp_osm_base": "2026-08-01T00:05:00Z" },
+  "elements": [
+    {
+      "type": "way",
+      "id": 100,
+      "nodes": [10, 11],
+      "geometry": [{ "lat": 43.23, "lon": 76.9 }, { "lat": 43.231, "lon": 76.901 }],
+      "tags": { "highway": "primary", "lit": "yes" }
+    },
+    {
+      "type": "way",
+      "id": 300,
+      "nodes": [30, 31],
+      "geometry": [{ "lat": 43.234, "lon": 76.904 }, { "lat": 43.235, "lon": 76.905 }],
+      "tags": { "highway": "tertiary" }
+    },
+    { "type": "node", "id": 2, "lat": 43.236, "lon": 76.906, "tags": { "highway": "crossing" } }
+  ]
+}
