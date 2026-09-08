@@ -39,3 +39,26 @@ export function formatFps(fps: number): string {
 export function formatShare(share: number): string {
   return `${Math.round(share * 100)}%`;
 }
+
+export function roundMeters(m: number): number {
+  return Math.round(m);
+}
+
+/**
+ * Time-based exponential smoothing step: `previous` decays toward `next` over `tauS` (the time
+ * constant, same units as `dtS`). Used against docs/tasks/T-18's review finding that
+ * `delayVehS`/`delayPersonS` (and anything derived from them, like `BottleneckItem.delayVehH`/
+ * `delayPersonH`) saw-tooth ±6% every `windowS / 8` - "не показывайте абсолютную задержку без
+ * сглаживания" (T-25 card notes). `previous === undefined` or a non-positive `dtS` (first sample,
+ * or a clock that didn't advance) snaps straight to `next` instead of smoothing from nothing.
+ */
+export function emaStep(
+  previous: number | undefined,
+  next: number,
+  dtS: number,
+  tauS: number,
+): number {
+  if (previous === undefined || dtS <= 0) return next;
+  const alpha = 1 - Math.exp(-dtS / tauS);
+  return previous + alpha * (next - previous);
+}

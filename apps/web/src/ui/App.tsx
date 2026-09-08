@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { ru } from "../i18n/ru.ts";
 import { buildConfigPatch, NETWORK_IDS, type TabKey, useStore } from "../state/store.ts";
 import { Viewport } from "../Viewport.tsx";
+import { BottlenecksTab } from "./BottlenecksTab.tsx";
 import { Hud } from "./Hud.tsx";
 import { Layout } from "./Layout.tsx";
 import { OverviewTab } from "./OverviewTab.tsx";
@@ -16,9 +17,8 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "compare", label: ru.tabCompare },
 ];
 
-/** The remaining two tabs are built in later tasks; T-23 wired up navigation, T-24 fills in "Сценарии". */
+/** The last tab is built in a later task; T-23 wired up navigation, T-24 filled in "Сценарии", T-25 fills in "Узкие места". */
 const STUB_TASK_ID: Partial<Record<TabKey, string>> = {
-  bottlenecks: "T-25",
   compare: "T-26",
 };
 
@@ -46,6 +46,7 @@ function SidePanel() {
       </div>
       <div className="tab-content">
         {activeTab === "overview" && <OverviewTab />}
+        {activeTab === "bottlenecks" && <BottlenecksTab />}
         {activeTab === "scenarios" && <ScenariosTab />}
         {stubTaskId !== undefined && <p className="tab-stub">{ru.comingSoon(stubTaskId)}</p>}
       </div>
