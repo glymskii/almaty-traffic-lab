@@ -36,9 +36,18 @@ export class LaneRuntime {
   /** Scenario toggle `behavior.taxisAllowedInBusLanes` (not runtime-safe, so it is read once). */
   private readonly taxisInBusLanes: boolean;
 
-  constructor(net: Network, rt: RuntimeNetwork, taxisAllowedInBusLanes: boolean) {
+  /** `IntersectionRuntime.connProhibited`: movements no phase ever releases are not served at all. */
+  private readonly connProhibited: Uint8Array;
+
+  constructor(
+    net: Network,
+    rt: RuntimeNetwork,
+    taxisAllowedInBusLanes: boolean,
+    connProhibited: Uint8Array,
+  ) {
     this.rt = rt;
     this.taxisInBusLanes = taxisAllowedInBusLanes;
+    this.connProhibited = connProhibited;
     const laneCount = rt.laneCount;
     this.turnMaskByClass = new Uint8Array(laneCount * CLASS_COUNT);
     this.linkTurnMaskByClass = new Uint8Array(rt.linkCount * CLASS_COUNT);
@@ -63,7 +72,9 @@ export class LaneRuntime {
 
     // A lane serves a movement when it has an outgoing connector with that turn whose target lane
     // admits the class. This is stricter and more honest than `lane.turns`: the compiler may have
-    // dropped a movement (prohibited left, bus-only exit) without touching the lane's tag.
+    // dropped a movement (prohibited left, bus-only exit) without touching the lane's tag, and the
+    // signal generator may have left a movement in the network with no signal group at all (T-08),
+    // which no phase ever releases -- a lane does not serve that movement either.
     for (let i = 0; i < laneCount; i++) {
       const start = rt.laneConnStart[i] as number;
       const count = rt.laneConnCount[i] as number;
@@ -73,6 +84,7 @@ export class LaneRuntime {
         for (let k = 0; k < count; k++) {
           const t = rt.laneConnList[start + k] as number;
           if (((rt.trackAllowedMask[t] as number) & bit) === 0) continue;
+          if (connProhibited[t] === 1) continue;
           mask |= turnBit(rt.connTurn[t] as number);
         }
         this.turnMaskByClass[i * CLASS_COUNT + cls] = mask;
@@ -163,18 +175,25 @@ export class LaneRuntime {
     );
   }
 
-  /** Outgoing connector of `lane` performing `turnCode` for the class, or the class default (-1 if none). */
+  /**
+   * Outgoing connector of `lane` performing `turnCode` for the class, or the first passable one the
+   * class may use (-1 when the lane has none). A movement no phase ever releases is skipped in both
+   * cases: handing it out would park the vehicle at the stop line for good.
+   */
   connectorFor(lane: number, clsCode: number, turnCode: number): number {
     const rt = this.rt;
     const start = rt.laneConnStart[lane] as number;
     const count = rt.laneConnCount[lane] as number;
     const bit = 1 << clsCode;
+    let fallback = -1;
     for (let k = 0; k < count; k++) {
       const t = rt.laneConnList[start + k] as number;
       if (((rt.trackAllowedMask[t] as number) & bit) === 0) continue;
+      if (this.connProhibited[t] === 1) continue;
       if ((rt.connTurn[t] as number) === turnCode) return t;
+      if (fallback < 0) fallback = t;
     }
-    return rt.trackNextByClass[lane * CLASS_COUNT + clsCode] as number;
+    return fallback;
   }
 
   /**

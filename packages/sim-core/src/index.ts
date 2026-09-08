@@ -1,3 +1,4 @@
+export type { OdModel } from "./demand/od.ts";
 export { idmAcceleration, idmFreeAcceleration } from "./models/idm.ts";
 export {
   MOBIL_FORCE_WITHIN_M,
@@ -8,6 +9,9 @@ export {
   mobilSafe,
 } from "./models/mobil.ts";
 export { Rng } from "./rng.ts";
+export { ROUTE_ARRIVE, ROUTE_UNREACHABLE } from "./routing/dijkstra.ts";
+export type { RoutingGraph } from "./routing/graph.ts";
+export { ROUTE_COPIES, type RouteTrees } from "./routing/trees.ts";
 export type { LaneRuntime } from "./runtime/lanes.ts";
 export type { RuntimeNetwork } from "./runtime/network.ts";
 export { TURN_KIND_BY_CODE, TurnCode } from "./runtime/turns.ts";

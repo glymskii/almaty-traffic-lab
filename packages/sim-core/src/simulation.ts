@@ -20,10 +20,16 @@ import {
   type VehicleClassParams,
   VehicleFlag,
 } from "@atl/contracts";
+import { OdModel } from "./demand/od.ts";
+import { tripRatePerS } from "./demand/profile.ts";
+import { ArrivalQueues } from "./demand/spawner.ts";
 import { sampleDriverInto } from "./models/driver.ts";
 import { idmAcceleration, idmFreeAcceleration } from "./models/idm.ts";
 import { mandatoryBias, mobilIncentive, mobilSafe } from "./models/mobil.ts";
 import { Rng } from "./rng.ts";
+import { ROUTE_ARRIVE, ROUTE_UNREACHABLE } from "./routing/dijkstra.ts";
+import { RoutingGraph } from "./routing/graph.ts";
+import { ROUTE_COPIES, RouteTrees } from "./routing/trees.ts";
 import { SimClock } from "./runtime/clock.ts";
 import { IntersectionRuntime } from "./runtime/intersections.ts";
 import { LaneRuntime } from "./runtime/lanes.ts";
@@ -139,11 +145,29 @@ export interface SimulationKernel {
   readonly intersections: IntersectionRuntime;
   /** Per vehicle slot: 1 when the driver refuses to enter a junction whose exit is full (T-11). */
   readonly gridlockDisciplined: Uint8Array;
+  /** Link-level routing graph (T-12); see `routing/graph.ts`. */
+  readonly routingGraph: RoutingGraph;
+  /** Origin-destination model (T-12); see `demand/od.ts`. */
+  readonly od: OdModel;
+  /** Static "next link" forest with `ROUTE_COPIES` perturbed copies; see `routing/trees.ts`. */
+  readonly routeTrees: RouteTrees;
+  /** Measured travel time per link, EMA over the vehicles that finished it (navigator costs). */
+  readonly liveTravelS: Float64Array;
+  /**
+   * Trips whose destination became unreachable mid-route (a missed turn lane onto a one-way street,
+   * a scenario override) and were retargeted to another gate. Non-zero is not an error, but a large
+   * share means the network or the lane logic loses vehicles.
+   */
+  readonly retargetedTrips: number;
+  /** Rebuilds the static forest from the free-flow costs (tests and benchmarks). */
+  rebuildRouteTrees(): void;
+  /** Rebuilds the navigator forest from the live costs right now (tests and benchmarks). */
+  rebuildLiveTrees(): void;
   /**
    * Forces the distribution of the next manoeuvre for vehicles entering `linkId`, replacing the
-   * uniform draw over the movements the link offers. Shares are relative weights over the movements
-   * that actually exist for the vehicle's class; a movement with weight 0 is never chosen. Stand-in
-   * for real route choice (T-12) and the way nuance tests dial turning demand up and down.
+   * route (and, without a route, the uniform draw over the movements the link offers). Shares are
+   * relative weights over the movements that actually exist for the vehicle's class; a movement
+   * with weight 0 is never chosen. The way nuance tests dial turning demand up and down.
    */
   setTurnShares(linkId: string, shares: Partial<Record<TurnKind, number>>): void;
 }
@@ -163,6 +187,19 @@ export function kernelOf(sim: Simulation): SimulationKernel {
     lanes: sim.lanes,
     intersections: sim.intersections,
     gridlockDisciplined: sim.gridlockDisciplined,
+    routingGraph: sim.routingGraph,
+    od: sim.od,
+    routeTrees: sim.routeTrees,
+    liveTravelS: sim.liveTravelS,
+    get retargetedTrips() {
+      return sim.retargetedTrips;
+    },
+    rebuildRouteTrees: () => {
+      sim.rebuildRouteTrees();
+    },
+    rebuildLiveTrees: () => {
+      sim.rebuildLiveTrees();
+    },
     setTurnShares: (linkId, shares) => {
       sim.setTurnShares(linkId, shares);
     },
@@ -204,6 +241,19 @@ const RNG_FORK_SPAWN = 0;
 const RNG_FORK_DRIVERS = 1;
 const RNG_FORK_LANES = 2;
 const RNG_FORK_JUNCTIONS = 3;
+/** Route-cost noise of the tree copies (drawn once at init) and the per-driver route draws (T-12). */
+const RNG_FORK_ROUTES = 4;
+const RNG_FORK_OD = 5;
+
+/** Smoothing of the measured link travel time the navigators route on (T-12, alpha). */
+const LIVE_COST_ALPHA = 0.3;
+/**
+ * A measured link traversal longer than this multiple of the free-flow time is clamped before it
+ * enters the EMA: a single vehicle that sat through ten cycles must not make a street look closed.
+ */
+const LIVE_COST_MAX_FACTOR = 20;
+/** Draws of an OD destination before a trip gives up and simply drives out of the network. */
+const DEST_DRAW_ATTEMPTS = 6;
 
 const CAUSE_LANE_CHANGE_WAIT = causeCode("lane_change_wait");
 const CAUSE_POCKET_SPILLBACK = causeCode("pocket_spillback");
@@ -252,6 +302,19 @@ class SimulationImpl implements Simulation {
   readonly signals: SignalRuntime;
   readonly lanes: LaneRuntime;
   readonly intersections: IntersectionRuntime;
+  readonly routingGraph: RoutingGraph;
+  readonly od: OdModel;
+  readonly routeTrees: RouteTrees;
+  /** Navigator forest, rebuilt from `liveTravelS` every `rerouteIntervalS`. */
+  private readonly liveTrees: RouteTrees;
+  /** See SimulationKernel.liveTravelS. */
+  readonly liveTravelS: Float64Array;
+  /** `ROUTE_COPIES * edgeCount` multipliers in [-routeCostNoise, +routeCostNoise]. */
+  private readonly routeNoise: Float64Array;
+  private liveTreesBuilt = false;
+  private nextRerouteS: number;
+  /** See SimulationKernel.retargetedTrips. */
+  retargetedTrips = 0;
 
   private cfg: SimConfig;
   private readonly clock: SimClock;
@@ -261,6 +324,10 @@ class SimulationImpl implements Simulation {
   private readonly laneRng: Rng;
   /** Gridlock-discipline draw at spawn (T-11). */
   private readonly junctionRng: Rng;
+  /** Route-copy and navigator draws at spawn (T-12). */
+  private readonly routeRng: Rng;
+  /** Origin-destination draws at spawn (T-12). */
+  private readonly odRng: Rng;
   private readonly hash = new TrajectoryHash();
 
   // ---- lane changes (T-10) ----
@@ -285,13 +352,8 @@ class SimulationImpl implements Simulation {
   readonly baseTripsPerHour: number;
   private readonly warmupEndS: number;
 
-  // ---- spawn state per gate ----
-  /** Remaining integrated intensity until the next arrival (Exp(1) in event units). */
-  private readonly gateBudget: Float64Array;
-  /** Arrivals that have not entered the network yet. */
-  private readonly gateWaiting: Int32Array;
-  /** How many of the waiting arrivals were already counted as spawn waits. */
-  private readonly gateWaitCounted: Int32Array;
+  // ---- spawn state per OD source ----
+  private readonly arrivals: ArrivalQueues;
   private scratchTail = -1;
 
   /** See SimulationKernel.entryBlockedCause. */
@@ -322,18 +384,22 @@ class SimulationImpl implements Simulation {
       opts.config.dtS,
       opts.config.signals,
     );
+    // Junctions first: `connProhibited` is what tells the lane runtime which movements are dead.
+    this.intersections = new IntersectionRuntime(opts.network, this.runtime);
     this.lanes = new LaneRuntime(
       opts.network,
       this.runtime,
       opts.config.behavior.taxisAllowedInBusLanes,
+      this.intersections.connProhibited,
     );
-    this.intersections = new IntersectionRuntime(opts.network, this.runtime);
     this.clock = new SimClock(opts.config.dtS, opts.config.startTimeMin);
     const master = new Rng(opts.config.seed);
     this.spawnRng = master.fork(RNG_FORK_SPAWN);
     this.driverRng = master.fork(RNG_FORK_DRIVERS);
     this.laneRng = master.fork(RNG_FORK_LANES);
     this.junctionRng = master.fork(RNG_FORK_JUNCTIONS);
+    this.routeRng = master.fork(RNG_FORK_ROUTES);
+    this.odRng = master.fork(RNG_FORK_OD);
     this.pendingLane = new Int32Array(opts.config.demand.vehicleBudget).fill(-1);
     this.pendingLeader = new Int32Array(opts.config.demand.vehicleBudget).fill(-1);
     this.laneChangeBlocked = new Uint8Array(opts.config.demand.vehicleBudget);
@@ -365,14 +431,39 @@ class SimulationImpl implements Simulation {
       opts.config.metrics.stoppedSpeedMps,
     );
 
-    const gateCount = this.runtime.gateCount;
-    this.gateBudget = new Float64Array(gateCount);
-    this.gateWaiting = new Int32Array(gateCount);
-    this.gateWaitCounted = new Int32Array(gateCount);
-    for (let g = 0; g < gateCount; g++) {
-      if ((this.runtime.gateShare[g] as number) > 0)
-        this.gateBudget[g] = this.spawnRng.exponential(1);
+    // Routing (T-12). The graph is topology only, so it is built once; the trees are the costs.
+    // `connProhibited` is already filled above, which is what keeps a movement no phase ever
+    // releases out of every route (T-08/T-11 notes).
+    this.routingGraph = new RoutingGraph(
+      opts.network,
+      this.runtime,
+      this.intersections.connProhibited,
+      CAR_CODE,
+    );
+    this.od = new OdModel(opts.network, this.runtime);
+    this.liveTravelS = Float64Array.from(this.routingGraph.freeTravelS);
+    this.routeNoise = new Float64Array(ROUTE_COPIES * this.routingGraph.edgeCount);
+    const noiseAmplitude = demand.routeCostNoise;
+    // Copy 0 stays unperturbed (the plain shortest path); the others spread over parallel streets.
+    for (let copy = 1; copy < ROUTE_COPIES; copy++) {
+      const base = copy * this.routingGraph.edgeCount;
+      for (let e = 0; e < this.routingGraph.edgeCount; e++) {
+        this.routeNoise[base + e] = (this.routeRng.float() * 2 - 1) * noiseAmplitude;
+      }
     }
+    this.routeTrees = new RouteTrees(
+      this.routingGraph,
+      this.runtime,
+      this.od.destNodes,
+      ROUTE_COPIES,
+    );
+    this.routeTrees.rebuild(this.routingGraph, this.routingGraph.freeTravelS, this.routeNoise);
+    // Navigators share one live forest: a navigation app gives everybody the same advice, and one
+    // copy is what keeps the periodic rebuild inside its budget.
+    this.liveTrees = new RouteTrees(this.routingGraph, this.runtime, this.od.destNodes, 1);
+    this.nextRerouteS = demand.rerouteIntervalS;
+
+    this.arrivals = new ArrivalQueues(this.od.sourceCount, this.od.sourceShare, this.spawnRng);
   }
 
   get config(): SimConfig {
@@ -396,7 +487,8 @@ class SimulationImpl implements Simulation {
     const dt = this.clock.dtS;
     const now = this.clock.simTimeS;
     this.updateSignals(now); // 1
-    // 2-3 (pedestrians, routing): later tasks.
+    // 2 (pedestrians): later task.
+    this.updateRoutes(now); // 3
     this.selectLanes(); // 4
     this.changeLanes(now); // 5
     this.intersections.update(this.pool, this.signals.groupState, this.cfg.metrics.stoppedSpeedMps);
@@ -476,6 +568,12 @@ class SimulationImpl implements Simulation {
       const t = track[i] as number;
       if (t < 0) continue;
       if (t >= rt.laneCount) {
+        pool.targetLane[i] = -1;
+        continue;
+      }
+      // The trip ends at the end of this link (T-12): the lane the vehicle is on already gets it
+      // there, so it must not chase a lane that serves some onward movement.
+      if (pool.routeArrive[i] === 1 && rt.laneReachesLinkEnd[t] === 1) {
         pool.targetLane[i] = -1;
         continue;
       }
@@ -689,11 +787,7 @@ class SimulationImpl implements Simulation {
     pool.laneChangeEndS[i] = now + LANE_CHANGE_DURATION_S;
     pool.remove(i);
     pool.insert(target, i); // `s` and `geomSeg` are shared by every lane of the link
-    pool.nextTrack[i] = this.lanes.connectorFor(
-      target,
-      pool.cls[i] as number,
-      pool.intendedTurn[i] as number,
-    );
+    pool.nextTrack[i] = this.continuationFor(i, target);
     pool.targetLane[i] = this.lanes.targetLane(
       target,
       pool.cls[i] as number,
@@ -737,7 +831,8 @@ class SimulationImpl implements Simulation {
   /**
    * Draws the movement a vehicle of class `cls` intends to make at the end of the link owning `lane`.
    * Uniform over the movements the link actually offers that class, unless `setTurnShares` gave the
-   * link explicit weights. Stand-in for route choice (T-12).
+   * link explicit weights. Used when the link is under explicit turn shares or when the vehicle has
+   * no route left (see `enterLink`).
    */
   private sampleTurn(lane: number, cls: number): number {
     const rt = this.runtime;
@@ -771,12 +866,208 @@ class SimulationImpl implements Simulation {
     return TurnCode.through;
   }
 
-  /** Assigns the intended movement and the matching connector to a vehicle that just entered `lane`. */
-  private enterLink(i: number, lane: number): void {
-    const cls = this.pool.cls[i] as number;
+  // ---- routing (T-12) ------------------------------------------------------
+
+  /**
+   * Routing (ARCHITECTURE, step 3). Everything a driver needs is precomputed in the "next link"
+   * forests, so a step only has to keep the navigator forest current: once every `rerouteIntervalS`
+   * it is rebuilt from `liveTravelS`, the EMA of the travel time vehicles actually spent on each
+   * link. Ordinary drivers read the static forest, which never changes, so their route is fixed for
+   * the whole trip. With no navigators the forest is never built at all.
+   */
+  private updateRoutes(now: number): void {
+    if (this.cfg.demand.navigatorShare <= 0 && this.liveTreesBuilt === false) return;
+    if (this.liveTreesBuilt && now < this.nextRerouteS) return;
+    this.rebuildLiveTrees();
+    const interval = this.cfg.demand.rerouteIntervalS;
+    this.nextRerouteS = now + interval;
+  }
+
+  rebuildRouteTrees(): void {
+    this.routeTrees.rebuild(this.routingGraph, this.routingGraph.freeTravelS, this.routeNoise);
+  }
+
+  rebuildLiveTrees(): void {
+    this.liveTrees.rebuild(this.routingGraph, this.liveTravelS, null);
+    this.liveTreesBuilt = true;
+  }
+
+  /**
+   * Records how long vehicle `i` took over the link it is leaving into the live cost of that link
+   * (exponential moving average, alpha = 0.3). The sample covers the link *and* the junction at its
+   * end, which is exactly what a navigator's live travel time means -- and what makes the static
+   * cost of an edge (travel + signal delay) comparable with it.
+   */
+  private recordLinkTravel(i: number, link: number, now: number): void {
+    const pool = this.pool;
+    const previous = pool.routeLink[i] as number;
+    if (previous >= 0 && previous !== link) {
+      const free = this.routingGraph.freeTravelS[previous] as number;
+      let sample = now - (pool.linkEnterS[i] as number);
+      if (sample < 0) sample = 0;
+      const cap = free * LIVE_COST_MAX_FACTOR;
+      if (cap > 0 && sample > cap) sample = cap;
+      this.liveTravelS[previous] =
+        (1 - LIVE_COST_ALPHA) * (this.liveTravelS[previous] as number) + LIVE_COST_ALPHA * sample;
+    }
+    pool.routeLink[i] = link;
+    pool.linkEnterS[i] = now;
+  }
+
+  /**
+   * Connector vehicle `i` takes off `lane`: the one that leads onto the link its route asks for,
+   * falling back to any connector of its intended manoeuvre. Used after a lane change, where the
+   * route was decided on another lane of the same link -- picking by manoeuvre alone would send the
+   * vehicle onto whichever street happens to be first with that turn.
+   */
+  private continuationFor(i: number, lane: number): number {
+    const pool = this.pool;
+    if (pool.routeArrive[i] === 1) return -1; // the trip ends at the end of this link
+    const cls = pool.cls[i] as number;
+    const next = pool.routeNextLink[i] as number;
+    if (next >= 0) {
+      const conn = this.routeConnector(lane, cls, next);
+      if (conn >= 0) return conn;
+      const detour = this.detourConnector(i, lane);
+      if (detour >= 0) return detour;
+    }
+    return this.lanes.connectorFor(lane, cls, pool.intendedTurn[i] as number);
+  }
+
+  /** The forest a driver reads: the live one for a navigator (once it exists), the static one else. */
+  private treesOf(i: number): { trees: RouteTrees; copy: number } {
+    const navigator =
+      ((this.pool.persistentFlags[i] as number) & VehicleFlag.NAVIGATOR) !== 0 &&
+      this.liveTreesBuilt;
+    return navigator
+      ? { trees: this.liveTrees, copy: 0 }
+      : { trees: this.routeTrees, copy: this.pool.routeCopy[i] as number };
+  }
+
+  /**
+   * Next link of vehicle `i` from `link`, retargeting the trip when the destination has become
+   * unreachable. That happens when a driver failed to reach its turn lane in time and was carried
+   * onto another street (see the T-10 notes): destination trees repair themselves, because the next
+   * `enterLink` simply reads the tree of the new link -- but if the new link cannot reach the
+   * destination at all, the trip is re-aimed at the first gate it can still reach, and only when
+   * even that fails does the vehicle fall back to driving out by the manoeuvre draw.
+   */
+  private routeTarget(i: number, link: number): number {
+    const pool = this.pool;
+    const dest = pool.routeDest[i] as number;
+    if (dest < 0) return ROUTE_UNREACHABLE;
+    const { trees, copy } = this.treesOf(i);
+    const next = trees.nextLink(copy, dest, link);
+    if (next !== ROUTE_UNREACHABLE) return next;
+    const gates = this.od.gateDests;
+    for (let k = 0; k < gates.length; k++) {
+      const d = gates[k] as number;
+      const candidate = trees.nextLink(copy, d, link);
+      if (candidate !== ROUTE_UNREACHABLE) {
+        pool.routeDest[i] = d;
+        this.retargetedTrips++;
+        return candidate;
+      }
+    }
+    pool.routeDest[i] = -1;
+    this.retargetedTrips++;
+    return ROUTE_UNREACHABLE;
+  }
+
+  /**
+   * Outgoing connector of `lane` that leads onto `toLink` for class `clsCode`, or -1. Preferred over
+   * picking a connector by manoeuvre kind, because two movements of the same kind may leave the same
+   * lane onto different streets.
+   */
+  private routeConnector(lane: number, clsCode: number, toLink: number): number {
+    const rt = this.runtime;
+    const start = rt.laneConnStart[lane] as number;
+    const count = rt.laneConnCount[lane] as number;
+    const bit = 1 << clsCode;
+    for (let k = 0; k < count; k++) {
+      const t = rt.laneConnList[start + k] as number;
+      if (((rt.trackAllowedMask[t] as number) & bit) === 0) continue;
+      if (this.intersections.connProhibited[t] === 1) continue;
+      const toLane = rt.connToLane[t - rt.laneCount] as number;
+      if ((rt.trackLink[toLane] as number) === toLink) return t;
+    }
+    return -1;
+  }
+
+  /**
+   * Second best from `lane`: the first connector whose target link can still reach the vehicle's
+   * destination. It is what a driver takes when the lane holding the ideal movement turns out to be
+   * unreachable -- a detour instead of the wrong street. Without it a missed turn lane hands the
+   * vehicle whatever movement the lane happens to offer first, which on a small bbox often means
+   * driving straight out of it (see the notes of T-10).
+   */
+  private detourConnector(i: number, lane: number): number {
+    const pool = this.pool;
+    const dest = pool.routeDest[i] as number;
+    if (dest < 0) return -1;
+    const rt = this.runtime;
+    const { trees, copy } = this.treesOf(i);
+    const start = rt.laneConnStart[lane] as number;
+    const count = rt.laneConnCount[lane] as number;
+    const bit = 1 << (pool.cls[i] as number);
+    for (let k = 0; k < count; k++) {
+      const t = rt.laneConnList[start + k] as number;
+      if (((rt.trackAllowedMask[t] as number) & bit) === 0) continue;
+      if (this.intersections.connProhibited[t] === 1) continue;
+      const toLink = rt.trackLink[rt.connToLane[t - rt.laneCount] as number] as number;
+      if (toLink < 0) continue;
+      if (trees.nextLink(copy, dest, toLink) !== ROUTE_UNREACHABLE) return t;
+    }
+    return -1;
+  }
+
+  /**
+   * Assigns the intended movement and the matching connector to a vehicle that just entered `lane`.
+   * The route decides, unless the link carries explicit `setTurnShares` weights (the tool nuance
+   * tests use to dial turning demand) or the vehicle has no usable route left.
+   */
+  private enterLink(i: number, lane: number, now: number): void {
+    const pool = this.pool;
+    const rt = this.runtime;
+    const cls = pool.cls[i] as number;
+    const link = rt.trackLink[lane] as number;
+    pool.routeArrive[i] = 0;
+    pool.routeNextLink[i] = -1;
+    if (link >= 0) this.recordLinkTravel(i, link, now);
+
+    if (link >= 0 && this.turnSharesSet[link] !== 1 && (pool.routeDest[i] as number) >= 0) {
+      const next = this.routeTarget(i, link);
+      if (next === ROUTE_ARRIVE) {
+        // End of the trip at the end of this link: a gate lane leaves the network by itself, an
+        // attractor node needs `routeArrive` so that `advanceTrack` completes instead of dropping.
+        pool.routeArrive[i] = 1;
+        pool.intendedTurn[i] = TurnCode.through;
+        pool.nextTrack[i] = -1;
+        return;
+      }
+      if (next !== ROUTE_UNREACHABLE) {
+        pool.routeNextLink[i] = next;
+        const conn = this.routeConnector(lane, cls, next);
+        if (conn >= 0) {
+          pool.intendedTurn[i] = rt.connTurn[conn] as number;
+          pool.nextTrack[i] = conn;
+          return;
+        }
+        // The movement exists on the link but not from this lane: the mandatory lane change of
+        // T-10 takes over, driven by `intendedTurn`. Should the vehicle fail to reach that lane,
+        // it leaves on the best movement this one still offers towards the destination.
+        const turn = this.routingGraph.turnTo(link, next);
+        if (turn >= 0) {
+          pool.intendedTurn[i] = turn;
+          const detour = this.detourConnector(i, lane);
+          pool.nextTrack[i] = detour >= 0 ? detour : this.lanes.connectorFor(lane, cls, turn);
+          return;
+        }
+      }
+    }
     const turn = this.sampleTurn(lane, cls);
-    this.pool.intendedTurn[i] = turn;
-    this.pool.nextTrack[i] = this.lanes.connectorFor(lane, cls, turn);
+    pool.intendedTurn[i] = turn;
+    pool.nextTrack[i] = this.lanes.connectorFor(lane, cls, turn);
   }
 
   setTurnShares(linkId: string, shares: Partial<Record<TurnKind, number>>): void {
@@ -1101,7 +1392,9 @@ class SimulationImpl implements Simulation {
     for (let hop = 0; hop < MAX_HOPS_PER_STEP; hop++) {
       const next = pool.nextTrack[i] as number;
       if (next < 0) {
-        if (rt.trackIsExit[t] === 1) this.despawn(i, now);
+        // A gate lane leaves the network; so does a vehicle whose route ends at this node (an
+        // attractor inside the polygon). Anything else ran out of lane and is dropped.
+        if (rt.trackIsExit[t] === 1 || pool.routeArrive[i] === 1) this.despawn(i, now);
         else this.drop(i);
         return false;
       }
@@ -1118,7 +1411,7 @@ class SimulationImpl implements Simulation {
       pool.laneChangeDir[i] = 0;
       pool.targetLane[i] = -1;
       this.laneChangeBlocked[i] = 0;
-      if (t < rt.laneCount) this.enterLink(i, t);
+      if (t < rt.laneCount) this.enterLink(i, t, now);
       else
         pool.nextTrack[i] = rt.trackNextByClass[
           t * CLASS_COUNT + (pool.cls[i] as number)
@@ -1173,77 +1466,79 @@ class SimulationImpl implements Simulation {
   }
 
   /**
-   * Poisson arrivals per gate (intensity from the hourly profile), placed when an entry lane has room.
-   * Arrivals that cannot enter wait in a per-gate counter capped at GATE_QUEUE_HORIZON_S seconds of
-   * the current rate, so a lower multiplier takes effect at once even behind a queue.
+   * Poisson arrivals per OD source (gates by `weightIn`, attractors by `weightOut`; intensity from
+   * the hourly profile), each with a destination drawn from the OD model, placed when an entry lane
+   * has room. Arrivals that cannot enter wait in a per-source counter capped at GATE_QUEUE_HORIZON_S
+   * seconds of the current rate, so a lower multiplier takes effect at once even behind a queue.
    */
   private spawn(dt: number, now: number): void {
     const cfg = this.cfg;
     const demand = cfg.demand;
-    const rt = this.runtime;
+    const od = this.od;
     const pool = this.pool;
-    const profile = demand.hourlyProfile[this.clock.hourOfDay] ?? 0;
-    const ratePerS = (this.baseTripsPerHour * profile * demand.multiplier) / 3600;
+    const ratePerS = tripRatePerS(this.baseTripsPerHour, demand, this.clock.hourOfDay);
     const afterWarmup = now >= this.warmupEndS;
     const peak = isPeakHour(cfg, this.clock.timeOfDayMin);
     const entryGapM = cfg.driver.minGapM.max;
-    for (let g = 0; g < rt.gateCount; g++) {
-      const share = rt.gateShare[g] as number;
+    for (let s = 0; s < od.sourceCount; s++) {
+      const share = od.sourceShare[s] as number;
       if (share <= 0) continue;
-      const gateRate = ratePerS * share;
-      let budget = (this.gateBudget[g] as number) - gateRate * dt;
-      let waiting = this.gateWaiting[g] as number;
-      while (budget <= 0) {
-        waiting++;
-        budget += this.spawnRng.exponential(1);
-      }
-      this.gateBudget[g] = budget;
-      const cap = Math.ceil(gateRate * GATE_QUEUE_HORIZON_S);
-      if (waiting > cap) waiting = cap;
-      this.gateWaiting[g] = waiting;
-      if ((this.gateWaitCounted[g] as number) > waiting) this.gateWaitCounted[g] = waiting;
+      const sourceRate = ratePerS * share;
+      this.arrivals.advance(s, sourceRate, dt, GATE_QUEUE_HORIZON_S, this.spawnRng);
 
       let blockedByLane = false;
-      while ((this.gateWaiting[g] as number) > 0) {
+      while ((this.arrivals.waiting[s] as number) > 0) {
         if (pool.freeCount === 0) break; // vehicle budget: arrivals keep waiting
         const cls: VehicleClass = this.spawnRng.chance(demand.taxiShare) ? "taxi" : "car";
         const clsParams = cfg.vehicleClasses[cls];
-        const lane = this.bestEntryLane(g, VEHICLE_CLASS_CODE[cls], clsParams.lengthM + entryGapM);
+        const lane = this.bestEntryLane(s, VEHICLE_CLASS_CODE[cls], clsParams.lengthM + entryGapM);
         if (lane < 0) {
           blockedByLane = true;
           break;
         }
-        this.place(lane, cls, clsParams, peak, now, afterWarmup);
-        this.gateWaiting[g] = (this.gateWaiting[g] as number) - 1;
-        if ((this.gateWaitCounted[g] as number) > 0)
-          this.gateWaitCounted[g] = (this.gateWaitCounted[g] as number) - 1;
+        this.place(lane, cls, clsParams, peak, now, afterWarmup, this.sampleDestFrom(s, lane));
+        this.arrivals.take(s);
       }
-      if (blockedByLane && afterWarmup) {
-        const uncounted = (this.gateWaiting[g] as number) - (this.gateWaitCounted[g] as number);
-        if (uncounted > 0) {
-          this.spawnWaits += uncounted;
-          this.gateWaitCounted[g] = this.gateWaiting[g] as number;
-        }
-      }
+      if (blockedByLane && afterWarmup) this.spawnWaits += this.arrivals.claimUncounted(s);
     }
   }
 
   /**
-   * Entry lane of gate `g` with the largest free space at its start among lanes admitting the class
-   * (ties go to the rightmost lane), or -1 when none has at least `needM` metres. Leaves the lane's
-   * last vehicle in `scratchTail`.
+   * Destination of a trip born on `lane` at source `s`, drawn from the OD model and rejected while
+   * the routing graph cannot get there (one-way streets and turn bans make a fair share of the OD
+   * pairs impossible on a small bbox). Reachability is a property of the topology, so testing it on
+   * the unperturbed copy 0 answers for every copy. -1 when nothing fits: the vehicle then simply
+   * drives out of the network.
    */
-  private bestEntryLane(g: number, clsCode: number, needM: number): number {
+  private sampleDestFrom(s: number, lane: number): number {
+    const link = this.runtime.trackLink[lane] as number;
+    const node = this.od.sourceNode[s] as number;
+    const internalShare = this.cfg.demand.internalTripShare;
+    for (let attempt = 0; attempt < DEST_DRAW_ATTEMPTS; attempt++) {
+      const dest = this.od.sampleDest(this.odRng, internalShare, node);
+      if (dest < 0) return -1;
+      if (link < 0) return dest;
+      if (this.routeTrees.nextLink(0, dest, link) !== ROUTE_UNREACHABLE) return dest;
+    }
+    return -1;
+  }
+
+  /**
+   * Entry lane of OD source `s` with the largest free space at its start among lanes admitting the
+   * class (ties go to the rightmost lane), or -1 when none has at least `needM` metres. Leaves the
+   * lane's last vehicle in `scratchTail`.
+   */
+  private bestEntryLane(s: number, clsCode: number, needM: number): number {
     const rt = this.runtime;
     const pool = this.pool;
     const bit = 1 << clsCode;
-    const start = rt.gateLaneStart[g] as number;
-    const count = rt.gateLaneCount[g] as number;
+    const start = this.od.sourceLaneStart[s] as number;
+    const count = this.od.sourceLaneCount[s] as number;
     let best = -1;
     let bestGap = Number.NEGATIVE_INFINITY;
     let bestTail = -1;
     for (let k = 0; k < count; k++) {
-      const lane = rt.gateLanes[start + k] as number;
+      const lane = this.od.sourceLanes[start + k] as number;
       if (((rt.trackAllowedMask[lane] as number) & bit) === 0) continue;
       const tail = pool.trackTail[lane] as number;
       const gap =
@@ -1270,6 +1565,7 @@ class SimulationImpl implements Simulation {
     peak: boolean,
     now: number,
     afterWarmup: boolean,
+    dest: number,
   ): void {
     const rt = this.runtime;
     const pool = this.pool;
@@ -1298,11 +1594,21 @@ class SimulationImpl implements Simulation {
     pool.a[i] = 0;
     pool.geomSeg[i] = 0;
     // Cars and taxis that ignore bus lanes are drawn once, at spawn (behavior.busLaneViolatorShare).
-    pool.persistentFlags[i] =
+    let persistent =
       (cls === "car" || cls === "taxi") &&
       this.laneRng.chance(this.cfg.behavior.busLaneViolatorShare)
         ? VehicleFlag.BUS_LANE_VIOLATOR
         : 0;
+    // Route (T-12): the tree copy spreads identical trips over parallel streets, the NAVIGATOR
+    // draw decides whether the driver follows live travel times or the static costs.
+    pool.routeDest[i] = dest;
+    pool.routeCopy[i] = this.routeRng.int(ROUTE_COPIES);
+    pool.routeArrive[i] = 0;
+    pool.routeNextLink[i] = -1;
+    pool.routeLink[i] = -1;
+    pool.linkEnterS[i] = now;
+    if (this.routeRng.chance(this.cfg.demand.navigatorShare)) persistent |= VehicleFlag.NAVIGATOR;
+    pool.persistentFlags[i] = persistent;
     pool.targetLane[i] = -1;
     pool.laneChangeEndS[i] = 0;
     pool.laneChangeDir[i] = 0;
@@ -1313,7 +1619,7 @@ class SimulationImpl implements Simulation {
     this.gridlockDisciplined[i] = this.junctionRng.chance(this.cfg.behavior.gridlockDiscipline)
       ? 1
       : 0;
-    this.enterLink(i, lane);
+    this.enterLink(i, lane, now);
     pool.flags[i] = vEntry <= this.cfg.metrics.stoppedSpeedMps ? VehicleFlag.STOPPED : 0;
     pool.cause[i] = CAUSE_FREE_FLOW;
     pool.rootCause[i] = CAUSE_FREE_FLOW;
@@ -1514,11 +1820,8 @@ class SimulationImpl implements Simulation {
     if (paths.length === 0) return;
     const multiplierBefore = this.cfg.demand.multiplier;
     this.cfg = applyConfigPatch(this.cfg, patch);
-    if (this.cfg.demand.multiplier < multiplierBefore) {
-      // Demand went down: arrivals queued under the old rate must not keep entering.
-      this.gateWaiting.fill(0);
-      this.gateWaitCounted.fill(0);
-    }
+    // Demand went down: arrivals queued under the old rate must not keep entering.
+    if (this.cfg.demand.multiplier < multiplierBefore) this.arrivals.clear();
   }
 
   trajectoryHash(): string {
