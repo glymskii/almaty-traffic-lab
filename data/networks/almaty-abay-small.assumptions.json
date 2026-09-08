@@ -1,7 +1,7 @@
 {
   "networkId": "almaty-abay-small",
   "bboxId": "almaty-abay-small",
-  "generatedAt": "2026-09-08T07:35:07.841Z",
+  "generatedAt": "2026-09-08T07:46:02.597Z",
   "sourceHash": "d5fc7e09aa103f3b6b5bd85d1b21c71d6f03c0b3c7e76f3a1e5b3ce0377b16ef",
   "stats": {
     "nodes": 444,
@@ -65,7 +65,7 @@
     },
     {
       "kind": "connector_priority_default",
-      "count": 1527,
+      "count": 1540,
       "example": "w1010536935_0_f:0>w1010536935_1_f:0"
     },
     {
@@ -120,6 +120,7 @@
     "node ng1236469258_0: gate only 0.24 m from a junction; weights set to 0 (no traffic is born or removed here)",
     "node ng1236469259_0: gate only 0.41 m from a junction; weights set to 0 (no traffic is born or removed here)",
     "node ng1349705503_0: gate only 4.4 m from a junction; weights set to 0 (no traffic is born or removed here)",
+    "intersections: 111 lane(s) reach a junction with no permitted movement; no vehicle may end up in them: w1124073982_0_f:1, w1124073982_0_f:2, w1124073982_0_f:3, w1191575344_0_f:0, w1191575348_0_b:0, ... (111 in total)",
     "stage \"signals\" (T-08) is not implemented yet; skipped",
     "stage \"transit\" (T-17) is not implemented yet; skipped",
     "stage \"city\" (T-27) is not implemented yet; skipped",

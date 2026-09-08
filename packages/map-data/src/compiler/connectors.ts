@@ -1,10 +1,12 @@
 import type { Connector, Lane, Network, Point2, TurnKind, VehicleClass } from "@atl/contracts";
 import { polylineLength } from "@atl/contracts";
+import { idealAngleDeg } from "../geometry/angles.ts";
 import { cubicBezierPolyline, laneCentrePoint } from "../geometry/bezier.ts";
 import { round, roundPolyline } from "../geometry/polyline.ts";
 import {
   type Approach,
   type Exit,
+  type ExitOption,
   exitOptions,
   type NodeMovements,
   pickExit,
@@ -52,9 +54,17 @@ function isAccelerationLane(lane: Lane): boolean {
   return lane.turns.length === 1 && lane.turns[0] === "merge";
 }
 
-/** Target lanes open to one kind of movement: merges take the acceleration lane, others avoid it. */
+/**
+ * Target lanes open to one kind of movement: merges take the acceleration lane, others avoid it.
+ * A street whose only lane is marked `merge` (OSM `turn:lanes=merge_to_left`, not an acceleration
+ * lane the compiler opened) would otherwise be unreachable, so an empty result falls back to all
+ * of the lanes.
+ */
 function movementTargets(targets: readonly Lane[], turn: TurnKind): Lane[] {
-  if (turn !== "merge") return targets.filter((l) => !isAccelerationLane(l));
+  if (turn !== "merge") {
+    const ordinary = targets.filter((l) => !isAccelerationLane(l));
+    return ordinary.length > 0 ? ordinary : [...targets];
+  }
   const accelerating = targets.filter(isAccelerationLane);
   return accelerating.length > 0 ? accelerating : [...targets];
 }
@@ -115,6 +125,28 @@ function planSideBySide(
   return plans;
 }
 
+/**
+ * Every exit a movement of this kind may take, straightest first. A node can offer two exits of
+ * the same kind — a fork with two through arms, a five-way junction with two lefts — and keeping
+ * only the straightest one would leave the other street unreachable from the node. `merge` and
+ * `diverge` are never produced by the angle classifier, so they still follow the single
+ * straightest exit.
+ */
+function exitsForTurn(turn: TurnKind, options: readonly ExitOption[]): ExitOption[] {
+  if (turn === "merge" || turn === "diverge") {
+    const one = pickExit(turn, options);
+    return one === undefined ? [] : [one];
+  }
+  const ideal = idealAngleDeg(turn);
+  return options
+    .filter((o) => o.turn === turn)
+    .sort((a, b) => {
+      const d = Math.abs(a.angleDeg - ideal) - Math.abs(b.angleDeg - ideal);
+      if (d !== 0) return d;
+      return a.exit.link.id < b.exit.link.id ? -1 : 1;
+    });
+}
+
 function laneEndPoint(approach: Approach, lane: Lane): Point2 {
   return laneCentrePoint(
     approach.point,
@@ -156,39 +188,39 @@ export function buildConnectors(
       for (const turn of TURN_ORDER) {
         const turning = sources.filter((l) => l.turns.includes(turn));
         if (turning.length === 0) continue;
-        const chosen = pickExit(turn, options);
-        if (chosen === undefined) continue;
-        const targets = movementTargets(targetLanes(chosen.exit), turn);
-        if (targets.length === 0) continue;
-        const plans =
-          turn === "through"
-            ? planThrough(turning, targets, approach.link.laneIds.length)
-            : planSideBySide(turning, targets, turn === "right" || turn === "merge");
-        for (const plan of plans) {
-          const id = connectorId(plan.from.id, plan.to.id);
-          if (seen.has(id)) continue;
-          seen.add(id);
-          const geometry = roundPolyline(
-            cubicBezierPolyline(
-              laneEndPoint(approach, plan.from),
-              approach.heading,
-              laneStartPoint(chosen.exit, plan.to),
-              chosen.exit.heading,
-            ),
-          );
-          connectors.push({
-            id,
-            fromLaneId: plan.from.id,
-            toLaneId: plan.to.id,
-            viaNodeId: node.id,
-            turn,
-            geometry,
-            lengthM: Math.max(round(polylineLength(geometry)), MIN_CONNECTOR_LENGTH_M),
-            protection: "yield",
-            conflicts: [],
-            crosswalkIds: [],
-            provenance: { protection: "default" },
-          });
+        for (const chosen of exitsForTurn(turn, options)) {
+          const targets = movementTargets(targetLanes(chosen.exit), turn);
+          if (targets.length === 0) continue;
+          const plans =
+            turn === "through"
+              ? planThrough(turning, targets, approach.link.laneIds.length)
+              : planSideBySide(turning, targets, turn === "right" || turn === "merge");
+          for (const plan of plans) {
+            const id = connectorId(plan.from.id, plan.to.id);
+            if (seen.has(id)) continue;
+            seen.add(id);
+            const geometry = roundPolyline(
+              cubicBezierPolyline(
+                laneEndPoint(approach, plan.from),
+                approach.heading,
+                laneStartPoint(chosen.exit, plan.to),
+                chosen.exit.heading,
+              ),
+            );
+            connectors.push({
+              id,
+              fromLaneId: plan.from.id,
+              toLaneId: plan.to.id,
+              viaNodeId: node.id,
+              turn,
+              geometry,
+              lengthM: Math.max(round(polylineLength(geometry)), MIN_CONNECTOR_LENGTH_M),
+              protection: "yield",
+              conflicts: [],
+              crosswalkIds: [],
+              provenance: { protection: "default" },
+            });
+          }
         }
       }
     }

@@ -122,6 +122,52 @@ describe("connectors on a 2x2 crossroads", () => {
 });
 
 // ---------------------------------------------------------------------------
+// A fork: one street splits into two arms that both classify as "through".
+// ---------------------------------------------------------------------------
+
+describe("nodes with two exits of the same turn kind", () => {
+  const fork = compile(
+    localSnapshot({ 1: [-300, 0], 2: [0, 0], 3: [300, 90], 4: [300, -90] }, [
+      { id: 100, tags: { highway: "tertiary", name: "Общая", lanes: "2" }, nodes: [1, 2] },
+      { id: 101, tags: { highway: "tertiary", name: "Левая ветвь", lanes: "2" }, nodes: [2, 3] },
+      { id: 102, tags: { highway: "tertiary", name: "Правая ветвь", lanes: "2" }, nodes: [2, 4] },
+    ]),
+  ).network;
+
+  it("feeds both branches of a fork, not only the straighter one", () => {
+    const entered = new Set(fork.connectors.map((c) => c.toLaneId.split(":")[0]));
+    expect(entered.has("w101_0_f")).toBe(true);
+    expect(entered.has("w102_0_f")).toBe(true);
+    const fromWest = fork.connectors.filter((c) => c.fromLaneId.startsWith("w100_0_f"));
+    expect(fromWest.map((c) => c.turn)).toEqual(["through", "through"]);
+  });
+
+  it("lets a lane marked merge_to_left in OSM be reached by ordinary traffic", () => {
+    const withMergeLane = compile(
+      localSnapshot({ 1: [-300, 0], 2: [0, 0], 3: [300, 0], 4: [0, -300] }, [
+        { id: 100, tags: { highway: "tertiary", name: "Главная" }, nodes: [1, 2] },
+        {
+          id: 101,
+          tags: {
+            highway: "tertiary",
+            name: "Главная",
+            oneway: "yes",
+            lanes: "1",
+            "turn:lanes": "merge_to_left",
+          },
+          nodes: [2, 3],
+        },
+        { id: 200, tags: { highway: "residential", name: "Боковая" }, nodes: [2, 4] },
+      ]),
+    ).network;
+    expect(lanesOf(withMergeLane, linkById(withMergeLane, "w101_0_f")).map((l) => l.turns)).toEqual(
+      [["merge"]],
+    );
+    expect(withMergeLane.connectors.some((c) => c.toLaneId === "w101_0_f:0")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Unsignalized T-junction: a residential street meets a secondary street.
 // ---------------------------------------------------------------------------
 

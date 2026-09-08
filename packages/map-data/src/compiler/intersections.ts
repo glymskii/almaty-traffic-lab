@@ -4,8 +4,34 @@ import { buildConnectors } from "./connectors.ts";
 import { buildCrosswalks } from "./crosswalks.ts";
 import { buildGates } from "./gates.ts";
 import { applyMergeProtection, applyMerges } from "./merges.ts";
-import { buildNodeMovements } from "./movements.ts";
+import { buildNodeMovements, type NodeMovements, sourceLanes } from "./movements.ts";
 import type { CompileContext } from "./stages.ts";
+
+/** How many dead lanes the warning names before it stops listing them. */
+const DEAD_LANE_SAMPLE = 5;
+
+/**
+ * Lanes that reach a junction but received no movement: OSM marks them for a turn the node does
+ * not offer (a left pocket at a node whose cross street is one-way the other way). Traffic must
+ * never be steered into such a lane, so the compiler reports them for T-11 and T-25.
+ */
+function warnDeadLanes(byNode: ReadonlyMap<string, NodeMovements>, ctx: CompileContext): void {
+  const used = new Set(ctx.network.connectors.map((c) => c.fromLaneId));
+  const dead: string[] = [];
+  for (const movements of byNode.values()) {
+    if (movements.node.kind === "gate") continue;
+    for (const approach of movements.approaches)
+      for (const lane of sourceLanes(approach)) if (!used.has(lane.id)) dead.push(lane.id);
+  }
+  if (dead.length === 0) return;
+  dead.sort();
+  const sample = dead.slice(0, DEAD_LANE_SAMPLE).join(", ");
+  const rest = dead.length > DEAD_LANE_SAMPLE ? `, ... (${dead.length} in total)` : "";
+  ctx.warn(
+    `intersections: ${dead.length} lane(s) reach a junction with no permitted movement; ` +
+      `no vehicle may end up in them: ${sample}${rest}`,
+  );
+}
 
 /**
  * Compiler stage "intersections" (T-07): lane-to-lane movements, conflict points and right of way,
@@ -34,4 +60,5 @@ export function runIntersections(ctx: CompileContext): void {
     projection: ctx.projection,
     assumptions: ctx.assumptions,
   });
+  warnDeadLanes(byNode, ctx);
 }
