@@ -1,5 +1,6 @@
 import type { Network } from "@atl/contracts";
 import { cycleLengthS } from "@atl/contracts";
+import { MERGE_ROUTING_PENALTY_S } from "../runtime/merges.ts";
 import type { RuntimeNetwork } from "../runtime/network.ts";
 import { TURN_COUNT, TurnCode } from "../runtime/turns.ts";
 
@@ -12,7 +13,7 @@ TURN_PENALTY_S[TurnCode.through] = 0;
 TURN_PENALTY_S[TurnCode.left] = 8;
 TURN_PENALTY_S[TurnCode.right] = 3;
 TURN_PENALTY_S[TurnCode.uturn] = 20;
-TURN_PENALTY_S[TurnCode.merge] = 0;
+TURN_PENALTY_S[TurnCode.merge] = MERGE_ROUTING_PENALTY_S;
 TURN_PENALTY_S[TurnCode.diverge] = 0;
 
 /** Route costs assume traffic actually runs at this share of the speed limit. */
