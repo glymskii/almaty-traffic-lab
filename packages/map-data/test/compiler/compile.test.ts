@@ -217,14 +217,15 @@ describe("compileNetwork on the mini fixture", () => {
       dead_end: 1,
       bend: 0,
     });
-    // The "stage not implemented" notices plus the dead-lane diagnostic of the intersections
-    // stage: the left pocket of w100_0_f has no left exit because the cross street is one-way.
-    // The footway and the service road are ignored silently.
+    // The "stage not implemented" notices (city, overrides; transit is wired but silent when the
+    // bbox has no transit data at all) plus the dead-lane diagnostic of the intersections stage:
+    // the left pocket of w100_0_f has no left exit because the cross street is one-way. The
+    // footway and the service road are ignored silently.
     expect(report.warnings.filter((w) => !w.includes("not implemented"))).toEqual([
       "intersections: 2 lane(s) reach a junction with no permitted movement; " +
         "no vehicle may end up in them: w100_0_f:0, w301_0_b:0",
     ]);
-    expect(report.warnings).toHaveLength(4);
+    expect(report.warnings).toHaveLength(3);
     expect(report.linkLevels).toEqual({});
   });
 

@@ -25,6 +25,9 @@ export const ASSUMPTION_KINDS = [
   "left_turn_prohibited_default",
   "gate_weight_default",
   "attractor_weight_default",
+  "bus_headway_peak_default",
+  "bus_headway_offpeak_default",
+  "bus_stop_kind_default",
 ] as const;
 export type AssumptionKind = (typeof ASSUMPTION_KINDS)[number];
 
@@ -77,6 +80,8 @@ export interface CompileStats {
   busLanes: number;
   pockets: number;
   totalLengthKm: number;
+  busRoutes: number;
+  busStops: number;
 }
 
 export function computeStats(net: Network): CompileStats {
@@ -117,5 +122,7 @@ export function computeStats(net: Network): CompileStats {
     busLanes,
     pockets,
     totalLengthKm: Math.round(lengthM / 100) / 10,
+    busRoutes: net.busRoutes.length,
+    busStops: net.busStops.length,
   };
 }

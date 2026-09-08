@@ -22,6 +22,7 @@ import { buildLinks, type LinkLevel, type WayLinks } from "./links.ts";
 import { buildOsmGraph } from "./osm-graph.ts";
 import { type CompileContext, LATER_STAGES, runLaterStages } from "./stages.ts";
 import { buildTopology } from "./topology.ts";
+import { runTransit } from "./transit.ts";
 
 export const GENERATOR = "@atl/map-data compiler 0.0.1";
 
@@ -30,6 +31,8 @@ const intersectionsStage = LATER_STAGES.find((s) => s.name === "intersections");
 if (intersectionsStage !== undefined) intersectionsStage.run = runIntersections;
 const signalsStage = LATER_STAGES.find((s) => s.name === "signals");
 if (signalsStage !== undefined) signalsStage.run = runSignals;
+const transitStage = LATER_STAGES.find((s) => s.name === "transit");
+if (transitStage !== undefined) transitStage.run = runTransit;
 
 export interface CompileOptions {
   bbox: BBoxPreset;
@@ -76,6 +79,12 @@ export { DEFAULT_SPEED_KPH, parseMaxspeed } from "./speeds.ts";
 export type { CompileContext, CompileStage } from "./stages.ts";
 export { LATER_STAGES } from "./stages.ts";
 export { HIGHWAY_CLASS_RANK, SIGNAL_COLLAPSE_M } from "./topology.ts";
+export {
+  DEFAULT_HEADWAY_OFFPEAK_S,
+  DEFAULT_HEADWAY_PEAK_S,
+  parseIntervalMinutes,
+  STOP_ATTACH_M,
+} from "./transit.ts";
 
 /** sha256 of the snapshot's JSON form, recorded as meta.sourceHash. */
 export function snapshotHash(snapshot: OsmSnapshot): string {
