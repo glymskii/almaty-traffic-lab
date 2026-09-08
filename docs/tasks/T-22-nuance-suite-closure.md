@@ -20,3 +20,8 @@
 ## Критерии приёмки
 - [ ] `grep -r "it.todo" packages/sim-core/test/nuances` пуст, кроме N27.
 - [ ] `pnpm check` зелёный, длительность тестов в отчёте.
+
+## Заметки из ревью T-08 (учесть)
+- `SignalController.offsetS` генератор заполняет нулём с provenance `default`; координация смещений
+  намеренно оставлена этой задаче. `regenerateController` (`packages/map-data/src/signals/regenerate.ts`)
+  уже умеет применять `offsetS` из override сценария и переставляет provenance в `manual`.

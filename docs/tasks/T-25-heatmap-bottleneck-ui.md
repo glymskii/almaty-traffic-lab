@@ -33,3 +33,8 @@
 ## Заметки из ревью T-05 (учесть)
 - Базовый меш полотна (`surface-*`) окрашен одним vertex-color на полосу и по 25-метровым сегментам не делится. Тепловую карту строить отдельным слоем-оверлеем по сегментам из `SegmentDescriptor[]` теми же примитивами `slicePolyline` / `buildRibbonGeometry` / `mergeRibbons` из `scene/ribbon.ts` и `geometry/lane-geometry.ts`, чуть выше полотна, не трогая `roads.ts`.
 - Пересборка `s → (x, y, heading)`: `sampleAtS` + `laneAxis` в `geometry/lane-geometry.ts`, без зависимости от sim-core (важно и для T-13).
+
+## Заметки из ревью T-08 (учесть)
+- В `apps/web/src/i18n/ru.ts` появятся пять новых видов допущений от компилятора светофоров, которым нужны
+  переводы: `signal_plan_default`, `left_turn_protected_default`, `left_turn_protected_permissive_default`,
+  `left_turn_permissive_default`, `left_turn_prohibited_default`.

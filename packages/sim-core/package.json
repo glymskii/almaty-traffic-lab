@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Pure deterministic microscopic traffic simulation (IDM + MOBIL, signals, intersections, buses, pedestrians, metrics, bottleneck detector). No DOM, no Three.",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./test-fixtures": "./test/fixtures/builders.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",

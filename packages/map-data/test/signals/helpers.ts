@@ -1,8 +1,9 @@
 import type { Connector, Network, SignalController } from "@atl/contracts";
 
 // The synthetic networks of T-03 live in the sim-core test tree; the plan generator is specified
-// against them (card T-08 §4). Test-only import: nothing in `src` reaches across packages.
-export { crossroads, tJunction } from "../../../sim-core/test/fixtures/builders.ts";
+// against them (card T-08 §4). They are reached through the `@atl/sim-core/test-fixtures` subpath
+// (rule 8: between packages only via `@atl/<name>`); `src` never reaches across packages.
+export { crossroads, tJunction } from "@atl/sim-core/test-fixtures";
 
 /**
  * The same network without any signal plan: this is what the compiler hands to the generator
@@ -61,6 +62,37 @@ export function protectedConflictsInPhases(net: Network, ctrl: SignalController)
           if (green.has(otherGroup) && other?.protection === "protected")
             bad.push(`${phase.id}: ${id} vs ${conflict.otherConnectorId}`);
         }
+      }
+    }
+  }
+  return bad;
+}
+
+/**
+ * Phases that give a green through movement and a zebra it drives across a green at the same time.
+ * Turning traffic may share a green with pedestrians and yield to them, a through movement may not:
+ * it is `protected` and never looks for a gap.
+ */
+export function pedestrianConflictsInPhases(net: Network, ctrl: SignalController): string[] {
+  const byId = new Map(net.connectors.map((c) => [c.id, c] as const));
+  const groupById = new Map(ctrl.groups.map((g) => [g.id, g] as const));
+  const bad: string[] = [];
+  for (const phase of ctrl.phases) {
+    const greenCrosswalks = new Set<string>();
+    for (const gid of phase.greenGroupIds) {
+      const group = groupById.get(gid);
+      if (group?.kind === "pedestrian")
+        for (const cwId of group.crosswalkIds) greenCrosswalks.add(cwId);
+    }
+    if (greenCrosswalks.size === 0) continue;
+    for (const gid of phase.greenGroupIds) {
+      const group = groupById.get(gid);
+      if (group === undefined || group.kind !== "vehicle") continue;
+      for (const id of group.connectorIds) {
+        const connector = byId.get(id);
+        if (connector?.turn !== "through") continue;
+        for (const cwId of connector.crosswalkIds)
+          if (greenCrosswalks.has(cwId)) bad.push(`${phase.id}: ${id} vs ${cwId}`);
       }
     }
   }

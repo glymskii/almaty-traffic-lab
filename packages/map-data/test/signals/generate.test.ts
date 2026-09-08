@@ -20,6 +20,7 @@ import {
   connectorsAt,
   controllerOf,
   crossroads,
+  pedestrianConflictsInPhases,
   protectedConflictsInPhases,
   stripControllers,
   tJunction,
@@ -94,6 +95,8 @@ describe("crossroads with left pockets", () => {
     expect(nsThrough?.greenGroupIds).toContain(`sg.cw.E.ped`);
     expect(nsThrough?.greenGroupIds).toContain(`sg.cw.W.ped`);
     expect(nsThrough?.greenGroupIds).not.toContain(`sg.cw.N.ped`);
+    // No phase walks pedestrians across a zebra a through movement of the same phase drives over.
+    expect(pedestrianConflictsInPhases(net, ctrl)).toEqual([]);
     // Pedestrians never walk during a protected-left phase.
     const arrowPhases = ctrl.phases.filter((p) =>
       p.greenGroupIds.some((id) => id === arrowGroupId("N.in")),
@@ -200,6 +203,9 @@ describe("signal plans on the small Almaty snapshot", () => {
         expect(cycle).toBeGreaterThanOrEqual(MIN_CYCLE_S);
         expect(cycle).toBeLessThanOrEqual(timing.maxCycleS);
         expect(protectedConflictsInPhases(net, ctrl)).toEqual([]);
+        // Odd and lopsided nodes: the arm a through movement leaves by may belong to another axis,
+        // so a zebra it crosses must not be green with it (review note of T-08).
+        expect(pedestrianConflictsInPhases(net, ctrl)).toEqual([]);
       }
     },
   );

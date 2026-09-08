@@ -1,7 +1,12 @@
-import type { Phase, SignalTiming } from "@atl/contracts";
+import type { Connector, Phase, SignalGroup, SignalTiming } from "@atl/contracts";
 import type { NodeMovements } from "../compiler/movements.ts";
 import { signedAngleDeg } from "../geometry/angles.ts";
-import { type ApproachPlan, AXIS_OPPOSITE_MIN_DEG, type GroupPlan } from "./groups.ts";
+import {
+  type ApproachPlan,
+  AXIS_OPPOSITE_MIN_DEG,
+  type GroupPlan,
+  type PedestrianPlan,
+} from "./groups.ts";
 import { arrowGreenS, type PhaseDemand, pedestrianGreenS, websterPlan } from "./webster.ts";
 
 /** One street of the node: two opposite arms, or a single arm that has no partner. */
@@ -82,6 +87,26 @@ export interface PhasePlan {
 }
 
 /**
+ * A zebra a green through movement drives across is not parallel to that movement, whatever the
+ * axis geometry said: on odd or lopsided nodes the arm a through movement leaves by can belong to
+ * another axis. Such a zebra is kept out of this phase and waits for one that does not release a
+ * through movement over it — a dedicated pedestrian phase, if no other phase carries it.
+ */
+function crossedByThrough(
+  ped: PedestrianPlan,
+  greenGroups: readonly SignalGroup[],
+  connectorById: ReadonlyMap<string, Connector>,
+): boolean {
+  for (const group of greenGroups)
+    for (const connectorId of group.connectorIds) {
+      const connector = connectorById.get(connectorId);
+      if (connector?.turn !== "through") continue;
+      if (connector.crosswalkIds.includes(ped.crosswalk.id)) return true;
+    }
+  return false;
+}
+
+/**
  * Phase order (card T-08 §1): per axis, the protected lefts of that axis first, then its through
  * and right movements together with the pedestrian groups of the *other* axes — a zebra across an
  * arm is parallel to the traffic of the streets that do not use that arm. A node whose arms make
@@ -99,6 +124,7 @@ export function buildPhases(
     axes.length <= 1 ? (axes.length === 0 ? [] : [axes]) : axes.map((a) => [a]);
   const drafts: PhaseDraft[] = [];
   const greened = new Set<string>();
+  const connectorById = new Map(groups.connectors.map((c) => [c.id, c] as const));
 
   for (const bundle of bundles) {
     const armIds = new Set(bundle.flatMap((ax) => ax.armNeighbourIds));
@@ -110,15 +136,18 @@ export function buildPhases(
       drafts.push({ kind: "arrow", greenGroupIds: arrowIds, criticalY: 0 });
       for (const id of arrowIds) greened.add(id);
     }
-    const mainIds = approaches
-      .map((p) => p.main?.id)
-      .filter((id): id is string => id !== undefined);
+    const mainGroups = approaches
+      .map((p) => p.main)
+      .filter((g): g is SignalGroup => g !== undefined);
     // A protected_permissive left also runs during the main green: same arrow, permissive service.
     for (const p of approaches)
       if (p.leftTurnMode === "protected_permissive" && p.arrow !== undefined)
-        mainIds.push(p.arrow.id);
+        mainGroups.push(p.arrow);
+    const mainIds = mainGroups.map((g) => g.id);
     const pedIds = groups.pedestrians
-      .filter((p) => !armIds.has(p.armNeighbourId))
+      .filter(
+        (p) => !armIds.has(p.armNeighbourId) && !crossedByThrough(p, mainGroups, connectorById),
+      )
       .map((p) => p.group.id);
     const greenGroupIds = [...mainIds, ...pedIds];
     if (greenGroupIds.length === 0) continue;

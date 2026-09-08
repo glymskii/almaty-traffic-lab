@@ -66,6 +66,10 @@ importers:
       '@atl/contracts':
         specifier: workspace:*
         version: link:../contracts
+    devDependencies:
+      '@atl/sim-core':
+        specifier: workspace:*
+        version: link:../sim-core
 
   packages/sim-core:
     dependencies:
