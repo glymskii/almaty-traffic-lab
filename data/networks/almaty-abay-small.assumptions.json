@@ -1,41 +1,41 @@
 {
   "networkId": "almaty-abay-small",
   "bboxId": "almaty-abay-small",
-  "generatedAt": "2026-09-08T00:40:36.197Z",
+  "generatedAt": "2026-09-08T06:29:07.913Z",
   "sourceHash": "d5fc7e09aa103f3b6b5bd85d1b21c71d6f03c0b3c7e76f3a1e5b3ce0377b16ef",
   "stats": {
-    "nodes": 451,
-    "links": 903,
-    "lanes": 1698,
+    "nodes": 444,
+    "links": 896,
+    "lanes": 1675,
     "nodesByKind": {
-      "junction": 216,
+      "junction": 209,
       "signalized": 70,
       "merge": 0,
       "gate": 56,
       "dead_end": 36,
       "bend": 73
     },
-    "speedDefaultShare": 0.663,
-    "laneCountDefaultShare": 0.357,
-    "turnsDefaultShare": 0.922,
+    "speedDefaultShare": 0.661,
+    "laneCountDefaultShare": 0.402,
+    "turnsDefaultShare": 0.924,
     "busLanes": 96,
-    "pockets": 71,
+    "pockets": 70,
     "totalLengthKm": 112.8
   },
   "assumptions": [
     {
       "kind": "speed_limit_default",
-      "count": 599,
+      "count": 592,
       "example": "w22576030_0_f (улица Шевченко)"
     },
     {
       "kind": "lane_count_default",
-      "count": 322,
+      "count": 320,
       "example": "w22576030_0_f (улица Шевченко)"
     },
     {
       "kind": "turns_default",
-      "count": 1566,
+      "count": 1547,
       "example": "w22576030_0_f:0"
     },
     {
@@ -45,7 +45,7 @@
     },
     {
       "kind": "pocket_length_default",
-      "count": 31,
+      "count": 30,
       "example": "w23444306_0_b:0"
     },
     {
