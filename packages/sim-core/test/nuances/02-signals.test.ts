@@ -158,9 +158,51 @@ describe("N06 local signal sequence", () => {
 });
 
 describe("N07 green split", () => {
-  it.todo(
-    "raising NS green from 30 s to 50 s lowers NS approach delay and raises EW approach delay",
-  );
+  /**
+   * Windowed vehicle-delay on each axis of a saturated crossroads with the given NS green share.
+   * Demand is deliberately taken from one reference network so that both runs load the junction
+   * exactly the same way: `saturationMultiplier` itself reads the green share, so asking each
+   * network for its own multiplier would change the demand along with the split.
+   */
+  function axisDelaysS(greenSplitNS: number, multiplier: number): { ns: number; ew: number } {
+    const network = crossroads({
+      lanes: 1,
+      leftTurnMode: "prohibited",
+      leftPocketM: 0,
+      greenSplitNS,
+    });
+    const config = defaultSimConfig({
+      demand: { multiplier, warmupMinutes: 3, vehicleBudget: 4000 },
+    });
+    const sim = createSimulation({ network, config });
+    sim.runUntil((3 + 10) * 60);
+    const metrics = sim.writeMetrics();
+    const segments = sim.segments();
+    let ns = 0;
+    let ew = 0;
+    for (const seg of segments) {
+      const delay = metrics.delayVehS[seg.index] as number;
+      if (seg.linkId === "N.in" || seg.linkId === "S.in") ns += delay;
+      else if (seg.linkId === "E.in" || seg.linkId === "W.in") ew += delay;
+    }
+    expect(ns).toBeGreaterThan(0);
+    expect(ew).toBeGreaterThan(0);
+    return { ns, ew };
+  }
+
+  it("moving green from the EW axis to the NS axis moves the delay with it", () => {
+    const reference = crossroads({ lanes: 1, leftTurnMode: "prohibited", leftPocketM: 0 });
+    const multiplier = saturationMultiplier(reference) * 1.2;
+    const nsShort = axisDelaysS(0.4, multiplier);
+    const nsLong = axisDelaysS(0.6, multiplier);
+    // More green for NS: its approaches wait less, the EW approaches wait more. Monotone in both
+    // directions, which is the whole point of the nuance.
+    expect(nsLong.ns).toBeLessThan(nsShort.ns);
+    expect(nsLong.ew).toBeGreaterThan(nsShort.ew);
+    // ... and the axis with the short green is the one that suffers in each run.
+    expect(nsShort.ns).toBeGreaterThan(nsShort.ew);
+    expect(nsLong.ew).toBeGreaterThan(nsLong.ns);
+  });
 });
 
 describe("N08 green wave", () => {

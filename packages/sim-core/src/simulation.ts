@@ -23,6 +23,10 @@ import {
 import { OdModel } from "./demand/od.ts";
 import { tripRatePerS } from "./demand/profile.ts";
 import { ArrivalQueues } from "./demand/spawner.ts";
+import { MetricsAccumulators } from "./metrics/accumulators.ts";
+import { RootCauseResolver } from "./metrics/rootCause.ts";
+import { SegmentIndex } from "./metrics/segments.ts";
+import { TotalsTracker } from "./metrics/totals.ts";
 import { sampleDriverInto } from "./models/driver.ts";
 import { idmAcceleration, idmFreeAcceleration } from "./models/idm.ts";
 import { mandatoryBias, mobilIncentive, mobilSafe } from "./models/mobil.ts";
@@ -149,6 +153,8 @@ export interface SimulationKernel {
   readonly intersections: IntersectionRuntime;
   /** Crosswalk arrivals, walkers and yield gap acceptance (T-15); see `pedestrians/crosswalks.ts`. */
   readonly pedestrians: PedestrianRuntime;
+  /** Segment lookup, lengths and capacities behind the metrics window (T-18); see `metrics/segments.ts`. */
+  readonly segmentIndex: SegmentIndex;
   /** Per vehicle slot: 1 when the driver refuses to enter a junction whose exit is full (T-11). */
   readonly gridlockDisciplined: Uint8Array;
   /** Link-level routing graph (T-12); see `routing/graph.ts`. */
@@ -193,6 +199,7 @@ export function kernelOf(sim: Simulation): SimulationKernel {
     lanes: sim.lanes,
     intersections: sim.intersections,
     pedestrians: sim.pedestrians,
+    segmentIndex: sim.segmentIndex,
     gridlockDisciplined: sim.gridlockDisciplined,
     routingGraph: sim.routingGraph,
     od: sim.od,
@@ -304,6 +311,9 @@ const DISCRETIONARY_EVERY = 5;
 const CAR_CODE = VEHICLE_CLASS_CODE.car;
 const BUS_CODE = VEHICLE_CLASS_CODE.bus;
 
+/** Tolerance when comparing simulation times accumulated in dtS steps (T-18 sampling schedule). */
+const TIME_EPS_S = 1e-9;
+
 // ---------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------
@@ -352,6 +362,17 @@ class SimulationImpl implements Simulation {
   // ---- transit (T-14) ----
   private readonly transitSchedule: BusScheduleRuntime;
   private readonly transitStops: BusStopRuntime;
+
+  // ---- metrics (T-18) ----
+  /** Segment geometry, capacities and the lane/connector -> segment lookup. */
+  readonly segmentIndex: SegmentIndex;
+  private readonly rootCauses: RootCauseResolver;
+  private readonly metrics: MetricsAccumulators;
+  private readonly totalsTracker: TotalsTracker;
+  /** Persons per vehicle of each class in the current hour; refreshed at every metrics sample. */
+  private readonly occupancyByClass = new Float64Array(CLASS_COUNT);
+  private nextSampleS: number;
+  private lastSampleS = 0;
 
   // ---- lane changes (T-10) ----
   /** Lane each vehicle decided to move into this step, -1 = stay. Refilled every step. */
@@ -510,6 +531,24 @@ class SimulationImpl implements Simulation {
       opts.config.pedestrians,
       this.pedestrianRng,
     );
+
+    // Metrics (T-18). Purely an observer of the state above: it never influences a single vehicle,
+    // so it is built last and sampled at the very end of a step.
+    const metricsCfg = opts.config.metrics;
+    this.segmentIndex = new SegmentIndex(
+      opts.network,
+      this.runtime,
+      opts.config.signals.saturationFlowVehPerHPerLane,
+    );
+    this.rootCauses = new RootCauseResolver(this.runtime, opts.config.demand.vehicleBudget);
+    this.metrics = new MetricsAccumulators(
+      this.runtime,
+      this.segmentIndex,
+      opts.config.demand.vehicleBudget,
+      metricsCfg.windowS,
+    );
+    this.totalsTracker = new TotalsTracker(metricsCfg.windowS);
+    this.nextSampleS = metricsCfg.sampleIntervalS;
   }
 
   get config(): SimConfig {
@@ -552,7 +591,33 @@ class SimulationImpl implements Simulation {
     this.spawn(dt, now); // 8
     this.spawnBuses(now, peak); // 9 (T-14)
     this.updatePositions(now);
+    this.sampleMetrics(now, peak); // 10 (T-18)
     this.foldHash();
+  }
+
+  /**
+   * Metrics sample (ARCHITECTURE, step 10). Runs at most once every `metrics.sampleIntervalS` and
+   * only reads state: first the root cause of every vehicle (`RootCauseResolver`), then one pass over
+   * the vehicles that folds speed, density, flow, queue length, delay and the delay-by-cause matrix
+   * into the sliding window (`MetricsAccumulators`). `writeMetrics()` is then a pure read of that
+   * window and can be called at any rate, independent of the sampling.
+   */
+  private sampleMetrics(now: number, peak: boolean): void {
+    if (now + TIME_EPS_S < this.nextSampleS) return;
+    const elapsed = now - this.lastSampleS;
+    this.lastSampleS = now;
+    const interval = this.cfg.metrics.sampleIntervalS;
+    this.nextSampleS += interval;
+    // A sampleIntervalS below dtS (or a long jump) must not make the next sample fire immediately.
+    if (this.nextSampleS <= now) this.nextSampleS = now + interval;
+    for (let c = 0; c < CLASS_COUNT; c++) {
+      const cls = VEHICLE_CLASS_BY_CODE[c];
+      if (!cls) continue;
+      const params = this.cfg.vehicleClasses[cls];
+      this.occupancyByClass[c] = peak ? params.occupancyPeak : params.occupancyOffpeak;
+    }
+    this.rootCauses.resolve(this.pool, this.cfg.metrics.stoppedSpeedMps);
+    this.metrics.sample(this.pool, now, elapsed, this.occupancyByClass, this.cfg.metrics);
   }
 
   runUntil(targetSimTimeS: number): void {
@@ -1542,6 +1607,8 @@ class SimulationImpl implements Simulation {
       if (vNew < 0) vNew = 0;
       if (vOld > stoppedV && vNew <= stoppedV) stops[i] = (stops[i] as number) + 1;
       v[i] = vNew;
+      // Distance really covered, the numerator of the trip's mean speed (T-18 totals).
+      pool.distanceM[i] = (pool.distanceM[i] as number) + vNew * dt;
       const sNew = (s[i] as number) + vNew * dt;
       let fl = 0;
       if (ai < BRAKING_MPS2) fl |= VehicleFlag.BRAKING;
@@ -1625,6 +1692,8 @@ class SimulationImpl implements Simulation {
       this.delayByClass[c] = (this.delayByClass[c] as number) + delay;
       this.stopsByClass[c] = (this.stopsByClass[c] as number) + (pool.stops[i] as number);
       this.personDelayByClass[c] = (this.personDelayByClass[c] as number) + delay * occupancy;
+      // Mean speed by class over the metrics window is measured on the trips that finished in it.
+      this.totalsTracker.recordTrip(c, pool.distanceM[i] as number, trip, now);
     }
     pool.remove(i);
     pool.release(i);
@@ -1806,6 +1875,7 @@ class SimulationImpl implements Simulation {
     pool.rootCause[i] = CAUSE_FREE_FLOW;
     pool.spawnTimeS[i] = now;
     pool.freeFlowTimeS[i] = ((rt.trackEndS[lane] as number) - sSpawn) / v0;
+    pool.distanceM[i] = 0;
     pool.stops[i] = 0;
     pool.countsInStats[i] = afterWarmup ? 1 : 0;
     pool.insert(lane, i);
@@ -1897,6 +1967,7 @@ class SimulationImpl implements Simulation {
     pool.rootCause[i] = CAUSE_FREE_FLOW;
     pool.spawnTimeS[i] = now;
     pool.freeFlowTimeS[i] = ((rt.trackEndS[lane] as number) - sSpawn) / v0;
+    pool.distanceM[i] = 0;
     pool.stops[i] = 0;
     pool.countsInStats[i] = afterWarmup ? 1 : 0;
     pool.insert(lane, i);
@@ -2001,7 +2072,10 @@ class SimulationImpl implements Simulation {
     return this.runtime.crosswalkIds.slice();
   }
 
-  /** Metrics arrive with T-18; until then every aggregate is zero. */
+  /**
+   * Windowed segment aggregates (T-18). A pure read of the sliding window the per-step sampler fills:
+   * calling it more or less often changes nothing about the numbers, only about how fresh they are.
+   */
   writeMetrics(frame?: MetricsFrame): MetricsFrame {
     const segmentCount = this.runtime.segments.length;
     const windowS = this.cfg.metrics.windowS;
@@ -2010,19 +2084,11 @@ class SimulationImpl implements Simulation {
     f.timeOfDayMin = this.clock.timeOfDayMin;
     f.windowS = windowS;
     f.segmentCount = segmentCount;
-    f.speedRatio.fill(0);
-    f.density.fill(0);
-    f.flow.fill(0);
-    f.queueM.fill(0);
-    f.congestedShare.fill(0);
-    f.delayVehS.fill(0);
-    f.delayPersonS.fill(0);
-    f.vcRatio.fill(0);
-    f.causeShare.fill(0);
+    this.metrics.write(f);
     return f;
   }
 
-  /** The detector arrives with T-19; until then the report carries live totals and no items. */
+  /** The detector and its ranked items arrive with T-19; the totals are real from T-18 on. */
   report(): BottleneckReport {
     return {
       simTimeS: this.clock.simTimeS,
@@ -2034,31 +2100,6 @@ class SimulationImpl implements Simulation {
   }
 
   private totals(): NetworkTotals {
-    const pool = this.pool;
-    const track = pool.track;
-    const stoppedV = this.cfg.metrics.stoppedSpeedMps;
-    let active = 0;
-    let stopped = 0;
-    let speedSum = 0;
-    let carCount = 0;
-    let carSpeed = 0;
-    let busCount = 0;
-    let busSpeed = 0;
-    for (let i = 0; i < pool.highWater; i++) {
-      if ((track[i] as number) < 0) continue;
-      const vi = pool.v[i] as number;
-      active++;
-      speedSum += vi;
-      if (vi <= stoppedV) stopped++;
-      const c = pool.cls[i] as number;
-      if (c === CAR_CODE) {
-        carCount++;
-        carSpeed += vi;
-      } else if (c === BUS_CODE) {
-        busCount++;
-        busSpeed += vi;
-      }
-    }
     let completed = 0;
     let delayS = 0;
     let personDelayS = 0;
@@ -2067,17 +2108,15 @@ class SimulationImpl implements Simulation {
       delayS += this.delayByClass[c] as number;
       personDelayS += this.personDelayByClass[c] as number;
     }
-    return {
-      vehiclesActive: active,
-      vehiclesCompleted: completed,
-      delayVehH: delayS / 3600,
-      delayPersonH: personDelayS / 3600,
-      meanSpeedKph: active > 0 ? (speedSum / active) * 3.6 : 0,
-      carMeanSpeedKph: carCount > 0 ? (carSpeed / carCount) * 3.6 : 0,
-      busMeanSpeedKph: busCount > 0 ? (busSpeed / busCount) * 3.6 : 0,
-      stoppedShare: active > 0 ? stopped / active : 0,
-      congestedSegmentShare: 0,
-    };
+    return this.totalsTracker.build(
+      this.pool,
+      this.runtime,
+      this.metrics,
+      this.cfg.metrics.stoppedSpeedMps,
+      this.clock.simTimeS,
+      { completed, delayS, personDelayS },
+      { car: CAR_CODE, bus: BUS_CODE },
+    );
   }
 
   setParams(patch: SimConfigPatch): void {

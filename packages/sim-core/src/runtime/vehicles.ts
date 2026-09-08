@@ -102,6 +102,8 @@ export class VehiclePool {
   readonly spawnTimeS: Float64Array;
   /** Free-flow travel time of the tracks traversed so far (denominator of trip delay). */
   readonly freeFlowTimeS: Float64Array;
+  /** Distance actually covered since the trip started, metres (numerator of the trip's mean speed). */
+  readonly distanceM: Float64Array;
   readonly stops: Uint16Array;
   /** 1 when the trip started after warm-up and counts for tripStats. */
   readonly countsInStats: Uint8Array;
@@ -167,6 +169,7 @@ export class VehiclePool {
     this.rootCause = new Uint8Array(capacity);
     this.spawnTimeS = new Float64Array(capacity);
     this.freeFlowTimeS = new Float64Array(capacity);
+    this.distanceM = new Float64Array(capacity);
     this.stops = new Uint16Array(capacity);
     this.countsInStats = new Uint8Array(capacity);
     this.ahead = new Int32Array(capacity).fill(-1);
