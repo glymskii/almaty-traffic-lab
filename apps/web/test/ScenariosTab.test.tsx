@@ -73,6 +73,36 @@ describe("ScenariosTab", () => {
     expect(useStore.getState().scenarios[0]?.overrides).toEqual([]);
   });
 
+  it("re-opens LinkForm with the scenario's already-saved override, not the (unrun) network's baseline", () => {
+    // The active scenario already has an override for l0, but hasn't been "Запущен" yet, so
+    // `viewport.network` (below) is still the unmodified baseline - the regression this guards
+    // against is the form reading only `network` and silently replacing that saved override with
+    // the baseline's values the moment the user hits "Применить" without touching a single field.
+    const network = buildStraightRoad({ lanes: 2, lengthM: 200 }); // baseline: 2 lanes, 60 km/h
+    useStore.setState({ viewport: fakeViewport(network) });
+    useStore.getState().createScenario("A");
+    useStore.getState().upsertOverrideInActiveScenario({
+      kind: "link",
+      linkId: "l0",
+      set: { generalLanes: 3, speedLimitKph: 40 },
+    });
+    useStore.getState().setSelection({ kind: "link", id: "l0" });
+
+    render(<ScenariosTab />);
+    const slider = screen.getByRole("slider") as HTMLInputElement;
+    expect(slider.value).toBe("3");
+    expect(screen.getByDisplayValue("40")).toBeTruthy();
+
+    // Applying the untouched form must not clobber the saved override with the baseline's values.
+    fireEvent.click(screen.getByText(ru.applyOverride));
+    const scenario = useStore.getState().scenarios[0];
+    expect(scenario?.overrides[0]).toMatchObject({
+      kind: "link",
+      linkId: "l0",
+      set: expect.objectContaining({ generalLanes: 3, speedLimitKph: 40 }),
+    });
+  });
+
   it("opens IntersectionForm for a signalized node and 'Применить' writes a signal override", () => {
     const network = buildSignalizedJunction();
     useStore.setState({ viewport: fakeViewport(network) });
@@ -86,6 +116,31 @@ describe("ScenariosTab", () => {
     const scenario = useStore.getState().scenarios[0];
     expect(scenario?.overrides).toHaveLength(1);
     expect(scenario?.overrides[0]).toMatchObject({ kind: "signal", nodeId: "n_c" });
+  });
+
+  it("re-opens IntersectionForm with the scenario's already-saved override, not the (unrun) network's baseline", () => {
+    const network = buildSignalizedJunction(); // baseline: leftTurnModes {} -> approach "in" shows "permissive"
+    useStore.setState({ viewport: fakeViewport(network) });
+    useStore.getState().createScenario("A");
+    useStore.getState().upsertOverrideInActiveScenario({
+      kind: "signal",
+      nodeId: "n_c",
+      set: { leftTurnModes: { in: "protected" }, cycleS: 90 },
+    });
+    useStore.getState().setSelection({ kind: "node", id: "n_c" });
+
+    render(<ScenariosTab />);
+    const select = screen.getByRole("combobox") as HTMLSelectElement;
+    expect(select.value).toBe("protected");
+    expect(screen.getByDisplayValue("90")).toBeTruthy();
+
+    fireEvent.click(screen.getByText(ru.applyOverride));
+    const scenario = useStore.getState().scenarios[0];
+    expect(scenario?.overrides[0]).toMatchObject({
+      kind: "signal",
+      nodeId: "n_c",
+      set: expect.objectContaining({ leftTurnModes: { in: "protected" }, cycleS: 90 }),
+    });
   });
 
   it("shows the not-editable message for a node without a signal controller", () => {

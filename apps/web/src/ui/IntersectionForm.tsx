@@ -4,6 +4,8 @@ import { ru } from "../i18n/ru.ts";
 import { findOverride } from "../state/scenarios.ts";
 import { useStore } from "../state/store.ts";
 
+type SignalOverrideSet = Extract<NetworkOverride, { kind: "signal" }>["set"];
+
 const LEFT_TURN_MODES: LeftTurnMode[] = [
   "permissive",
   "protected",
@@ -23,8 +25,22 @@ function cycleLengthOf(controller: Network["signalControllers"][number]): number
   return controller.phases.reduce((sum, p) => sum + p.greenS + p.yellowS + p.allRedS, 0);
 }
 
-function initialState(controller: Network["signalControllers"][number]): FormState {
-  const leftTurnModes: Record<string, LeftTurnMode> = { ...controller.leftTurnModes };
+/**
+ * Reads the node's current plan for the form's initial values, then layers `override` (this
+ * node's *already-saved* `signal` override in the active scenario, if any) on top field by field.
+ * Without this, reopening the form for a node the active scenario already overrides - while that
+ * scenario hasn't been run yet, so `network`/`controller` still reflect the unmodified baseline -
+ * would show the baseline's values and silently replace the saved override with them on the next
+ * "Применить" (same failure mode as `LinkForm`'s `initialState`).
+ */
+function initialState(
+  controller: Network["signalControllers"][number],
+  override: SignalOverrideSet | undefined,
+): FormState {
+  const leftTurnModes: Record<string, LeftTurnMode> = {
+    ...controller.leftTurnModes,
+    ...override?.leftTurnModes,
+  };
   const greenS: Record<string, number> = {};
   for (const group of controller.groups) {
     if (group.kind !== "vehicle") continue;
@@ -33,10 +49,10 @@ function initialState(controller: Network["signalControllers"][number]): FormSta
   }
   return {
     leftTurnModes,
-    cycleS: cycleLengthOf(controller),
-    offsetS: controller.offsetS,
-    pedestrianPhase: controller.pedestrianPhase,
-    greenS,
+    cycleS: override?.cycleS ?? cycleLengthOf(controller),
+    offsetS: override?.offsetS ?? controller.offsetS,
+    pedestrianPhase: override?.pedestrianPhase ?? controller.pedestrianPhase,
+    greenS: { ...greenS, ...override?.greenS },
   };
 }
 
@@ -52,9 +68,13 @@ export function IntersectionForm({ scenario, nodeId, network }: IntersectionForm
   const controller = network.signalControllers.find((c) => c.nodeId === nodeId);
   const upsertOverride = useStore((s) => s.upsertOverrideInActiveScenario);
   const removeOverride = useStore((s) => s.removeOverrideFromActiveScenario);
+  const existingOverride = findOverride(scenario, "signal", nodeId);
   const [form, setForm] = useState<FormState>(() =>
     controller
-      ? initialState(controller)
+      ? initialState(
+          controller,
+          existingOverride?.kind === "signal" ? existingOverride.set : undefined,
+        )
       : { leftTurnModes: {}, cycleS: 60, offsetS: 0, pedestrianPhase: true, greenS: {} },
   );
 
@@ -72,7 +92,7 @@ export function IntersectionForm({ scenario, nodeId, network }: IntersectionForm
     .slice()
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
-  const hasOverride = findOverride(scenario, "signal", nodeId) !== undefined;
+  const hasOverride = existingOverride !== undefined;
 
   const setLeftTurnMode = (linkId: string, mode: LeftTurnMode): void =>
     setForm((prev) => ({ ...prev, leftTurnModes: { ...prev.leftTurnModes, [linkId]: mode } }));

@@ -4,6 +4,8 @@ import { ru } from "../i18n/ru.ts";
 import { findOverride } from "../state/scenarios.ts";
 import { useStore } from "../state/store.ts";
 
+type LinkOverrideSet = Extract<NetworkOverride, { kind: "link" }>["set"];
+
 /** minutes-of-day (0..1440) <-> "HH:MM" for the bus lane hour inputs. */
 function minToTime(min: number): string {
   const h = Math.floor(min / 60) % 24;
@@ -27,8 +29,19 @@ interface FormState {
   busLaneEntryM: number;
 }
 
-/** Reads the link's current shape from the network for the form's initial values (docs/tasks/T-24 п.2). */
-function initialState(network: Network, linkId: string): FormState {
+/**
+ * Reads the link's current shape from the network for the form's initial values (docs/tasks/T-24
+ * п.2), then layers `override` (this link's *already-saved* override in the active scenario, if
+ * any) on top field by field. Without this, reopening the form for a link the active scenario
+ * already overrides - while that scenario hasn't been run yet, so `network` is still the
+ * unmodified baseline - would show the network's pre-override values and silently replace the
+ * saved override with them on the next "Применить".
+ */
+function initialState(
+  network: Network,
+  linkId: string,
+  override: LinkOverrideSet | undefined,
+): FormState {
   const link = network.links.find((l) => l.id === linkId);
   const lanes = network.lanes.filter((l) => l.linkId === linkId);
   const leftPocket = lanes.find((l) => l.kind === "turn_pocket" && l.turns.includes("left"));
@@ -38,15 +51,29 @@ function initialState(network: Network, linkId: string): FormState {
   const busLane = lanes.find((l) => l.kind === "bus");
   const generalLanes = lanes.filter((l) => l !== leftPocket && l !== rightPocket && l !== busLane);
   const lengthM = link?.lengthM ?? 0;
+
+  const networkBusLaneEnabled = busLane !== undefined;
+  const busLaneEnabled =
+    override?.busLane === null
+      ? false
+      : override?.busLane !== undefined
+        ? true
+        : networkBusLaneEnabled;
+
   return {
-    generalLanes: Math.max(1, generalLanes.length),
-    speedLimitKph: link?.speedLimitKph ?? 60,
-    leftPocketLengthM: leftPocket ? Math.round(lengthM - leftPocket.startS) : 0,
-    rightPocketLengthM: rightPocket ? Math.round(lengthM - rightPocket.startS) : 0,
-    busLaneEnabled: busLane !== undefined,
-    busLaneFromMin: busLane?.busLane?.activeFromMin ?? 0,
-    busLaneToMin: busLane?.busLane?.activeToMin ?? 1440,
-    busLaneEntryM: busLane?.busLane?.carsMayEnterForRightTurnWithinM ?? 50,
+    generalLanes: override?.generalLanes ?? Math.max(1, generalLanes.length),
+    speedLimitKph: override?.speedLimitKph ?? link?.speedLimitKph ?? 60,
+    leftPocketLengthM:
+      override?.leftPocketLengthM ?? (leftPocket ? Math.round(lengthM - leftPocket.startS) : 0),
+    rightPocketLengthM:
+      override?.rightPocketLengthM ?? (rightPocket ? Math.round(lengthM - rightPocket.startS) : 0),
+    busLaneEnabled,
+    busLaneFromMin: override?.busLane?.activeFromMin ?? busLane?.busLane?.activeFromMin ?? 0,
+    busLaneToMin: override?.busLane?.activeToMin ?? busLane?.busLane?.activeToMin ?? 1440,
+    busLaneEntryM:
+      override?.busLane?.carsMayEnterForRightTurnWithinM ??
+      busLane?.busLane?.carsMayEnterForRightTurnWithinM ??
+      50,
   };
 }
 
@@ -62,10 +89,17 @@ export function LinkForm({ scenario, linkId, network }: LinkFormProps) {
   const link = network.links.find((l) => l.id === linkId);
   const upsertOverride = useStore((s) => s.upsertOverrideInActiveScenario);
   const removeOverride = useStore((s) => s.removeOverrideFromActiveScenario);
-  const [form, setForm] = useState<FormState>(() => initialState(network, linkId));
+  const existingOverride = findOverride(scenario, "link", linkId);
+  const [form, setForm] = useState<FormState>(() =>
+    initialState(
+      network,
+      linkId,
+      existingOverride?.kind === "link" ? existingOverride.set : undefined,
+    ),
+  );
 
   if (link === undefined) return null;
-  const hasOverride = findOverride(scenario, "link", linkId) !== undefined;
+  const hasOverride = existingOverride !== undefined;
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]): void =>
     setForm((prev) => ({ ...prev, [key]: value }));
