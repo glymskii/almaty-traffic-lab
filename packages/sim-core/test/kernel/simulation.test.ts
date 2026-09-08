@@ -1,6 +1,7 @@
 import {
   allocateFrameBuffers,
   allocateMetricsFrame,
+  CAUSE_COUNT,
   causeCode,
   defaultSimConfig,
   type SimConfigPatch,
@@ -275,7 +276,7 @@ describe("createSimulation on a straight road", () => {
     expect(s.config.dtS).toBe(0.1);
   });
 
-  it("returns honest stubs for metrics, report, signals and crosswalks", () => {
+  it("fills metrics and totals on a free-flowing road, and leaves the detector to T-19", () => {
     const s = sim(straightRoad(), { demand: { tripsPerHourPeak: 600, warmupMinutes: 0 } });
     s.runUntil(200);
     expect(s.segments()).toHaveLength(80);
@@ -287,11 +288,26 @@ describe("createSimulation on a straight road", () => {
     expect(m.segmentCount).toBe(80);
     expect(m.windowS).toBe(300);
     expect(m.simTimeS).toBe(s.simTimeS);
-    expect(m.speedRatio.every((v) => v === 0)).toBe(true);
+    // Free flow: every segment that saw a vehicle is close to its free-flow speed and nowhere
+    // near congested, and the road as a whole is nowhere near capacity.
+    const busy = [...m.speedRatio].filter((v) => v > 0);
+    expect(busy.length).toBeGreaterThan(0);
+    expect(Math.min(...busy)).toBeGreaterThan(0.8);
+    expect(m.congestedShare.every((v) => v === 0)).toBe(true);
+    expect(m.queueM.every((v) => v === 0)).toBe(true);
+    // 600 trips/h over the road's lanes, minus the ramp-up the window still covers.
+    expect(Math.max(...m.flow)).toBeGreaterThan(150);
+    expect(Math.max(...m.vcRatio)).toBeLessThan(0.9);
+    // Rows of causeShare sum to 1 (delay was attributed) or to 0 (no delay on the segment).
+    for (let i = 0; i < m.segmentCount; i++) {
+      let sum = 0;
+      for (let c = 0; c < CAUSE_COUNT; c++) sum += m.causeShare[i * CAUSE_COUNT + c] as number;
+      expect(sum === 0 || Math.abs(sum - 1) < 1e-6).toBe(true);
+    }
     const own = allocateMetricsFrame(80, 300);
     own.flow[3] = 42;
     expect(s.writeMetrics(own)).toBe(own);
-    expect(own.flow[3]).toBe(0);
+    expect(own.flow[3]).toBe(m.flow[3]);
     const r = s.report();
     expect(r.items).toEqual([]);
     expect(r.totals.vehiclesActive).toBe(s.vehicleCount());
@@ -299,6 +315,7 @@ describe("createSimulation on a straight road", () => {
     expect(r.totals.meanSpeedKph).toBeGreaterThan(30);
     expect(r.totals.stoppedShare).toBe(0);
     expect(r.totals.busMeanSpeedKph).toBe(0);
+    expect(r.totals.congestedSegmentShare).toBe(0);
     expect(r.windowS).toBe(300);
   });
 
