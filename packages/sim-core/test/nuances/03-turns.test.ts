@@ -71,7 +71,31 @@ describe("N09 pocket spillback", () => {
     expect(short).toBeLessThan(long * 0.95);
   });
 
-  it.todo("root cause pocket_spillback share on the affected approach > 20% (needs T-18 metrics)");
+  it("root cause pocket_spillback share on the affected approach is > 20%", () => {
+    // Same fixture and demand as the through-flow comparison above, at the short (overflowing)
+    // pocket: high left demand queues into the through lane and the detector (T-18/T-19) should
+    // blame the pocket for a real share of the north approach's delay.
+    const network = crossroads({ leftPocketM: 40, leftTurnMode: "protected" });
+    const config = defaultSimConfig({
+      seed: 1,
+      demand: {
+        multiplier: saturationMultiplier(network) * 1.2,
+        warmupMinutes: WARMUP_MIN,
+        vehicleBudget: 4000,
+      },
+    });
+    const sim = createSimulation({ network, config });
+    for (const dir of ["N", "E", "S", "W"]) {
+      kernelOf(sim).setTurnShares(`${dir}.in`, { left: LEFT_SHARE, through: 1 - LEFT_SHARE });
+    }
+    sim.runUntil((WARMUP_MIN + RUN_MIN) * 60);
+
+    const report = sim.report();
+    const approach = report.items.find((item) => item.id === "N.in:center");
+    expect(approach).toBeDefined();
+    const pocketShare = approach?.causes.find((c) => c.cause === "pocket_spillback")?.share ?? 0;
+    expect(pocketShare).toBeGreaterThan(0.2);
+  });
 });
 
 /**
