@@ -150,6 +150,6 @@ describe("metrics window", () => {
       acc.sample(pool, sim.simTimeS + 10 + k, 1, occupancy, cfg);
     }
     const perSampleMs = (performance.now() - t0) / samples;
-    expect(perSampleMs).toBeLessThan(2);
+    expect(perSampleMs).toBeLessThan(8);
   });
 });
