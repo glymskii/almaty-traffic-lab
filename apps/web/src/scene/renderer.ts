@@ -40,15 +40,20 @@ export function createEngine(container: HTMLElement): Engine {
   const skyColor = new THREE.Color(BACKGROUND_COLOR);
   scene.background = skyColor;
 
+  // Near plane at 1 m, not 0.1: the scene spans kilometres, and a 0.1/5000 range leaves the depth
+  // buffer with ~0.6 m of resolution a kilometre out - far coarser than the centimetre gaps between
+  // road surface, markings and the heat-map overlay, so those layers flickered against each other
+  // as the camera moved. The logarithmic depth buffer keeps that precision usable across the whole
+  // range; the cost (no early-Z) is irrelevant for this low-overdraw, shadowless scene.
   const camera = new THREE.PerspectiveCamera(
     55,
     Math.max(container.clientWidth, 1) / Math.max(container.clientHeight, 1),
-    0.1,
+    1,
     5000,
   );
   camera.position.set(0, 120, 200);
 
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  const renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
   renderer.shadowMap.enabled = false;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
   renderer.setSize(container.clientWidth, container.clientHeight);

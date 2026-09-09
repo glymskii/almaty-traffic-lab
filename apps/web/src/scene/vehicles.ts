@@ -104,6 +104,12 @@ function makeInstancedMesh(
   const mesh = new THREE.InstancedMesh(UNIT_BOX, material, capacity);
   mesh.count = capacity;
   for (let i = 0; i < capacity; i++) mesh.setMatrixAt(i, ZERO_SCALE_MATRIX);
+  // Three.js computes an InstancedMesh bounding sphere once, on the first frustum test, and caches
+  // it. Every instance starts zero-scaled at the origin, so that sphere is a point at (0,0,0) and
+  // never updates as vehicles spread across the network - the whole batch then disappears whenever
+  // the origin leaves the view. Vehicles cover the entire network anyway, so per-object culling
+  // buys nothing; switch it off instead of recomputing the sphere every frame.
+  mesh.frustumCulled = false;
   return mesh;
 }
 

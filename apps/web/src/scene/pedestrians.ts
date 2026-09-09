@@ -35,6 +35,9 @@ export function createPedestrianInstances(network: Network): PedestrianInstances
   mesh.count = capacity;
   mesh.name = "pedestrians";
   for (let i = 0; i < capacity; i++) mesh.setMatrixAt(i, ZERO_SCALE_MATRIX);
+  // Same stale-bounding-sphere trap as vehicles.ts: the cached sphere would be a point at the
+  // origin, culling every pedestrian as soon as the origin leaves the view.
+  mesh.frustumCulled = false;
 
   const scratch = new THREE.Matrix4();
   const pedSize = { lengthM: PED_RADIUS_M, heightM: PED_RADIUS_M, widthM: PED_RADIUS_M };

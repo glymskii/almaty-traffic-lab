@@ -218,3 +218,18 @@ describe("createVehicleInstances / update", () => {
     expect(instanceScale(findMesh(vehicles.object, "body"), 3)).toBeGreaterThan(0);
   });
 });
+
+describe("frustum culling", () => {
+  it("disables per-object culling on every instanced mesh", () => {
+    // Regression: instances start zero-scaled at the origin, so Three.js caches a point-sized
+    // bounding sphere on the first frustum test and culls the whole batch once the origin leaves
+    // the view - vehicles vanished depending on where the camera looked.
+    const instances = createVehicleInstances(8);
+    const meshes: THREE.InstancedMesh[] = [];
+    instances.object.traverse((child) => {
+      if ((child as THREE.InstancedMesh).isInstancedMesh) meshes.push(child as THREE.InstancedMesh);
+    });
+    expect(meshes.length).toBeGreaterThan(0);
+    for (const mesh of meshes) expect(mesh.frustumCulled).toBe(false);
+  });
+});

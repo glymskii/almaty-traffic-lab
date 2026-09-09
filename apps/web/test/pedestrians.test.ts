@@ -75,3 +75,13 @@ describe("createPedestrianInstances", () => {
       expect(instanceScale(mesh, i)).toBe(0);
   });
 });
+
+describe("frustum culling", () => {
+  it("disables per-object culling so pedestrians never vanish with the origin", () => {
+    const network = buildSignalizedJunction();
+    const instances = createPedestrianInstances(network);
+    const mesh = instances.object as unknown as THREE.InstancedMesh;
+    expect(mesh.isInstancedMesh).toBe(true);
+    expect(mesh.frustumCulled).toBe(false);
+  });
+});
