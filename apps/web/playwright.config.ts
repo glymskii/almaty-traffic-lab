@@ -33,5 +33,14 @@ export default defineConfig({
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"], channel: "chromium" } }],
+  projects: [
+    {
+      name: "chromium",
+      use: {
+        ...devices["Desktop Chrome"],
+        channel: "chromium",
+        launchOptions: { args: ["--enable-unsafe-swiftshader"] },
+      },
+    },
+  ],
 });
