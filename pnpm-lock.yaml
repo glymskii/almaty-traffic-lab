@@ -94,6 +94,9 @@ importers:
       '@atl/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@atl/map-data':
+        specifier: workspace:*
+        version: link:../map-data
 
   packages/sim-worker:
     dependencies:

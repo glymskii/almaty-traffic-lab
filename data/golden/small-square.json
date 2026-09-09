@@ -1,0 +1,35 @@
+{
+  "id": "small-square",
+  "network": "data/networks/almaty-abay-small.network.json.gz",
+  "seed": 1,
+  "minutes": 10,
+  "totals": {
+    "vehiclesActive": 13669,
+    "vehiclesCompleted": 2987,
+    "delayVehH": 7.961773370567287,
+    "delayPersonH": 24.738800439485857,
+    "meanSpeedKph": 31.174846672415633,
+    "carMeanSpeedKph": 31.966039085538917,
+    "busMeanSpeedKph": 13.120511440778772,
+    "stoppedShare": 0.9291828224449484,
+    "congestedSegmentShare": 0.00024390243902439024
+  },
+  "top": [
+    {
+      "rank": 1,
+      "id": "w40755921_0_f:n259994572",
+      "dominantCause": "pedestrian_yield"
+    },
+    {
+      "rank": 2,
+      "id": "w1235109779_1_f:n260723746",
+      "dominantCause": "yield_priority"
+    },
+    {
+      "rank": 3,
+      "id": "w385200734_0_f:n242095776",
+      "dominantCause": "pocket_spillback"
+    }
+  ],
+  "trajectoryHash": "cc65b4b452cc85d3"
+}

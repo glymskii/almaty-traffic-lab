@@ -11,9 +11,12 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "sim": "node src/cli.ts"
+    "sim": "node src/cli.ts",
+    "sim:regress": "node src/cli/regress.ts",
+    "sim:golden": "node src/cli/regress.ts --write"
   },
   "dependencies": {
-    "@atl/contracts": "workspace:*"
+    "@atl/contracts": "workspace:*",
+    "@atl/map-data": "workspace:*"
   }
 }
