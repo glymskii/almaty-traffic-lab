@@ -337,6 +337,27 @@ scripts/copy-networks.mjs      data/networks/*.gz -> public/networks/ (predev/pr
 pnpm --filter @atl/web dev      # то же, что pnpm dev из корня
 pnpm --filter @atl/web build    # то же, что pnpm build из корня
 pnpm --filter @atl/web test     # vitest, окружение jsdom (T-23: смоук-тест TimeBar на @testing-library/react)
+pnpm --filter @atl/web e2e      # то же, что pnpm e2e из корня (см. ниже)
+```
+
+## E2E smoke-тест (T-30)
+
+`e2e/smoke.spec.ts` (Playwright, конфиг `playwright.config.ts`) поднимает прод-сборку через `pnpm build`
+и `vite preview` (`webServer`), открывает страницу и проверяет: канвас смонтирован, за 15 с пришло
+не меньше 10 кадров, в консоли браузера нет ошибок. Сеть не нужна — `data/loadNetwork.ts` при пустом
+`data/networks/` использует встроенную демо-сеть. Ход кадров читается из `window.__atl.frames` —
+счётчика, который `scene/renderer.ts` увеличивает в цикле `requestAnimationFrame` на каждый вызов
+`renderer.render` (тип объявлен в `src/global.d.ts`); тест не читает пиксели и не трогает воркер/сим.
+
+Проект Playwright закреплён на `channel: "chromium"` (полный браузер, который `playwright install
+chromium` ставит вместе с лёгким "headless shell") — на "headless shell" этот канвас ловит throttling
+`requestAnimationFrame` до ~1 fps (в консоли повторяется `GL Driver Message ... GPU stall due to
+ReadPixels`), из-за чего проверка «≥ 10 кадров за 15 с» становится нестабильной; на полном браузере
+эта же страница держит 30+ fps без такого стола.
+
+```bash
+pnpm exec playwright install --with-deps chromium   # один раз локально; в CI отдельный шаг
+pnpm e2e
 ```
 
 ## Вне объёма (T-25)

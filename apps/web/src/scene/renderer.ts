@@ -75,6 +75,9 @@ export function createEngine(container: HTMLElement): Engine {
   scene.add(ground);
 
   const frameCallbacks = new Set<(dtS: number) => void>();
+  // Liveness counter for the Playwright smoke test (docs/tasks/T-30) - a fresh counter per mount
+  // is fine, the test only asserts it keeps increasing after the page loads.
+  window.__atl = { frames: 0 };
   let lastTimeMs = performance.now();
   let rafId = requestAnimationFrame(function animate() {
     rafId = requestAnimationFrame(animate);
@@ -83,6 +86,7 @@ export function createEngine(container: HTMLElement): Engine {
     lastTimeMs = nowMs;
     for (const callback of frameCallbacks) callback(dtS);
     renderer.render(scene, camera);
+    if (window.__atl) window.__atl.frames += 1;
   });
 
   const resize = (): void => {
