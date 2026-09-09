@@ -20,7 +20,14 @@ test("app boots, renders frames and stays quiet in the console", async ({ page }
   await expect(page.locator("canvas").first()).toBeVisible();
 
   await expect
-    .poll(() => page.evaluate(() => window.__atl?.frames ?? 0), { timeout: FRAMES_TIMEOUT_MS })
+    .poll(
+      async () => {
+        const f = await page.evaluate(() => window.__atl?.frames ?? 0);
+        console.log(`[DEBUG] t=${Date.now()} frames=${f}`);
+        return f;
+      },
+      { timeout: FRAMES_TIMEOUT_MS },
+    )
     .toBeGreaterThanOrEqual(MIN_FRAMES);
 
   expect(consoleErrors).toEqual([]);
