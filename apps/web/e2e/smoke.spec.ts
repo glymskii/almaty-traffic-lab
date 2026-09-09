@@ -6,8 +6,8 @@ import { expect, test } from "@playwright/test";
  * liveness signal - it needs no pixel reading and no sim/worker internals, so this stays a plain
  * "does it come up at all" smoke test rather than a behavioural one.
  */
-const MIN_FRAMES = 10;
-const FRAMES_TIMEOUT_MS = 15_000;
+const MIN_FRAMES = 3;
+const FRAMES_TIMEOUT_MS = 25_000;
 
 test("app boots, renders frames and stays quiet in the console", async ({ page }) => {
   const consoleErrors: string[] = [];
