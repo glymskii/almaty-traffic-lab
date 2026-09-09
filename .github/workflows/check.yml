@@ -1,0 +1,71 @@
+name: check
+
+# docs/tasks/T-30: `check` runs `pnpm check` (typecheck + lint + determinism + tests) and the build
+# on every push/PR - the project's Definition of Done. `e2e` builds the app and runs the Playwright
+# smoke test (apps/web/e2e/smoke.spec.ts) as a separate job so a slow/flaky browser run never blocks
+# on or hides a `check` failure. `bench` is manual-only (docs/tasks/T-28's N27 perf nuance runs
+# behind `ATL_BENCH`, gated with `describe.skipIf`) - it has no fixed pass/fail threshold, so it
+# never runs on push/PR.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  # Keep in sync with package.json's "packageManager" field.
+  PNPM_VERSION: 10.33.4
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm build
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @atl/web exec playwright install --with-deps chromium
+      - run: pnpm e2e
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  bench:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+        env:
+          ATL_BENCH: "1"

@@ -20,7 +20,8 @@
     "import": "pnpm --filter @atl/map-data run import",
     "compile": "pnpm --filter @atl/map-data compile",
     "dev": "pnpm --filter @atl/web dev",
-    "build": "pnpm --filter @atl/web build"
+    "build": "pnpm --filter @atl/web build",
+    "e2e": "pnpm --filter @atl/web e2e"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.12",
