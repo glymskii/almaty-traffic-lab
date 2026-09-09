@@ -74,12 +74,24 @@ export interface ViewportHandle {
   engine: Engine;
   rig: CameraRig;
   network: Network;
+  /** The network exactly as `loadNetwork` returned it, before this mount's own `scenarioOverrides`
+   * were applied (docs/tasks/T-26): comparison mode compiles scenario B from this, not from
+   * `network`, so B's overrides aren't layered on top of A's. */
+  baseNetwork: Network;
   /** "Здания"/"Зелень и вода" layer groups (docs/tasks/T-27 §2) - the Обзор tab toggles `.visible` directly. */
   cityLayers: CityLayers;
   /** Synchronous snapshot; undefined before warm-up finishes (prefer `onSimReady` unless polling). */
   getSim: () => SimHandle | undefined;
   /** Calls back once, when the sim becomes playable (immediately if it already is). */
   onSimReady: (cb: (sim: SimHandle) => void) => () => void;
+  /**
+   * docs/tasks/T-26 п.2: "рендер читает кадры выбранного клиента" - the A/B toggle in the time bar
+   * calls this with scenario B's `SimHandle` to make vehicles/signals/pedestrians draw from it
+   * instead of the mount's own sim, or `undefined` to go back to the default (A). Road geometry
+   * itself is not rebuilt - the toggle switches which sim's frames are read, not what's drawn under
+   * them (safe as long as B's overrides don't relayout lanes; see this task's decisionsNeeded).
+   */
+  setCompareSim: (sim: SimHandle | undefined) => void;
 }
 
 interface MountedScene {
@@ -88,6 +100,7 @@ interface MountedScene {
   cityLayers: CityLayers;
   getSim: () => SimHandle | undefined;
   onSimReady: (cb: (sim: SimHandle) => void) => () => void;
+  setCompareSim: (sim: SimHandle | undefined) => void;
   cleanup: () => void;
 }
 
@@ -165,6 +178,9 @@ function mountScene(
   let sim: SimHandle | undefined;
   let disposed = false;
   const simReady = createOnceEmitter<SimHandle>();
+  // docs/tasks/T-26: when set (scenario B's SimHandle), the render loop below reads vehicles/
+  // signals/pedestrians from this instead of `sim` - see ViewportHandle.setCompareSim.
+  let compareSim: SimHandle | undefined;
 
   // Sky/light/headlights by time of day (docs/tasks/T-27 §3). Derived from `simTimeS` rather than
   // reading `FrameMeta.timeOfDayMin` directly: that field starts life hard-coded to 0 (midnight) in
@@ -192,11 +208,12 @@ function mountScene(
       vehicles.update(renderFrame);
       return;
     }
-    if (!sim) return;
-    sim.sampleVehicles(dtS, renderFrame);
+    const activeSim = compareSim ?? sim;
+    if (!activeSim) return;
+    activeSim.sampleVehicles(dtS, renderFrame);
     vehicles.update(renderFrame);
-    signals.update(sim.signalStates(), renderFrame.simTimeS);
-    pedestrians.update(sim.crosswalkPeds());
+    signals.update(activeSim.signalStates(), renderFrame.simTimeS);
+    pedestrians.update(activeSim.crosswalkPeds());
   });
 
   const resizeObserver = new ResizeObserver(() => resizeLabelRenderer(labelRenderer, container));
@@ -255,6 +272,9 @@ function mountScene(
     cityLayers,
     getSim: () => sim,
     onSimReady: simReady.subscribe,
+    setCompareSim: (next) => {
+      compareSim = next;
+    },
     cleanup: () => {
       disposed = true;
       window.removeEventListener("keydown", onKeyDown);
@@ -378,9 +398,11 @@ export function Viewport({
           engine: scene.engine,
           rig: scene.rig,
           network,
+          baseNetwork,
           cityLayers: scene.cityLayers,
           getSim: scene.getSim,
           onSimReady: scene.onSimReady,
+          setCompareSim: scene.setCompareSim,
         });
       })
       .catch((error: unknown) => {

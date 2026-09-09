@@ -109,6 +109,7 @@ describe("sortReportItems", () => {
 function fakeViewport(network: Network): ViewportHandle {
   return {
     network,
+    baseNetwork: network,
     engine: {
       scene: new THREE.Scene(),
       camera: new THREE.PerspectiveCamera(),
@@ -117,6 +118,7 @@ function fakeViewport(network: Network): ViewportHandle {
     cityLayers: {} as ViewportHandle["cityLayers"],
     getSim: () => undefined,
     onSimReady: () => () => {},
+    setCompareSim: () => {},
   };
 }
 

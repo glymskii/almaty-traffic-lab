@@ -29,6 +29,12 @@ export const ru = {
   presetEvening: "Вечер 18:30",
   warmupProgressLabel: "Прогрев",
 
+  // A/B toggle (docs/tasks/T-26 п.2).
+  abToggleA: "A",
+  abToggleB: "Б",
+  abToggleHint: "Tab — переключить, что рисуется: сценарий A или Б",
+  abStarting: "Сценарий Б готовится…",
+
   // Camera presets (docs/tasks/T-05/T-13 review: overview vs. a closer traffic view).
   cameraOverview: "Обзор сети",
   cameraCloseUp: "Приблизить к трафику",
@@ -195,6 +201,7 @@ export const ru = {
   bottlenecksApplied: (name: string) => `Добавлено в сценарий «${name}»`,
   bottlenecksShow: "Показать",
   bottlenecksNewScenarioName: (title: string) => `Из узкого места: ${title}`,
+  bottlenecksShowingB: "Показаны узкие места сценария Б (переключено в баре времени)",
 
   // Heat-map (docs/tasks/T-25 п.1).
   heatmapToggle: "Тепловая карта скорости (окно 5 мин)",
@@ -210,4 +217,42 @@ export const ru = {
   minimapTitle: "Мини-карта",
 
   metersLabel: (m: number) => `${m} м`,
+
+  // Compare tab (docs/tasks/T-26).
+  compareTitle: "Сравнение сценариев",
+  compareIntro:
+    "A — уже запущенный сценарий. Выберите Б и запустите сравнение: оба идут одним сидом, время синхронизируется автоматически.",
+  compareScenarioBLabel: "Сценарий Б",
+  compareScenarioBPlaceholder: "Выберите сценарий…",
+  compareStart: "Запустить сравнение",
+  compareRestart: "Перезапустить Б",
+  compareStop: "Остановить сравнение",
+  compareNotReady: "Сначала дождитесь запуска симуляции A.",
+  compareNotStarted: "Выберите сценарий Б и запустите сравнение, чтобы увидеть дельты.",
+  compareStarting: "Сценарий Б прогревается…",
+  compareApplyToB: "Применить рекомендацию в Б",
+  compareAppliedToB: "Добавлено в сценарий Б, сравнение перезапущено",
+  compareNewScenarioName: (title: string) => `Сравнение: ${title}`,
+
+  compareColMetric: "Показатель",
+  compareColA: "A",
+  compareColB: "Б",
+  compareColDelta: "Δ (Б − A)",
+  compareMetricLabels: {
+    delayVehH: "Задержка, маш-ч",
+    delayPersonH: "Задержка, чел-ч",
+    meanSpeedKph: "Средняя скорость, км/ч",
+    carMeanSpeedKph: "Скорость легковых, км/ч",
+    busMeanSpeedKph: "Скорость автобусов, км/ч",
+    congestedSegmentShare: "Доля сегментов LOS E/F",
+  },
+
+  compareTopNTitleA: "Топ узких мест — A",
+  compareTopNTitleB: "Топ узких мест — Б",
+  compareDiffTitle: "Изменения узких мест",
+  compareAppeared: "Новые в Б",
+  compareDisappeared: "Исчезли в Б",
+  compareMoved: "Переехали на другой подход",
+  compareNoDiffItems: "Нет отличий",
+  compareMovedFrom: (title: string) => `было: ${title}`,
 } as const;

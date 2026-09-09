@@ -7,6 +7,7 @@ import {
   type SimConfigPatch,
 } from "@atl/contracts";
 import { create } from "zustand";
+import { type AbRunner, type AbSide, type AbStatus, createAbRunner } from "../sim/abRunner.ts";
 import type { SimHandle } from "../sim/client.ts";
 import type { Status, ViewportHandle } from "../Viewport.tsx";
 import {
@@ -153,6 +154,16 @@ const REPORT_POLL_INTERVAL_MS = 3000;
 /** How often (in accumulated render seconds) the HUD's fps/rtFactor/vehicle count are refreshed. */
 const HUD_UPDATE_INTERVAL_S = 0.5;
 
+// ---------------------------------------------------------------------------
+// A/B comparison (docs/tasks/T-26). "A" is always whatever the app's one main sim/viewport is
+// already running (`sim`/`report` above, tied to `appliedScenarioId`) - comparison only ever adds
+// a second background worker for scenario "B", owned by `abRunner` (sim/abRunner.ts) and mirrored
+// into `simB`/`reportB` here. `abSelected` is the time bar's A/B toggle (Tab key): it decides which
+// side's frames `viewport.setCompareSim` feeds into the 3D scene and which side BottlenecksTab's
+// heat-map/Топ-N read, but never which side is "running" - both keep simulating regardless.
+// ---------------------------------------------------------------------------
+export type { AbSide, AbStatus };
+
 export interface StoreState {
   activeTab: TabKey;
   networkKey: NetworkKey;
@@ -181,6 +192,17 @@ export interface StoreState {
   viewport: ViewportHandle | undefined;
   sim: SimHandle | undefined;
   report: BottleneckReport | undefined;
+
+  /** Scenario B's own sim/report (docs/tasks/T-26); undefined until a comparison is started. */
+  simB: SimHandle | undefined;
+  reportB: BottleneckReport | undefined;
+  /** Which scenario id `simB` was (re)started with, if any - `applyRecommendationToScenarioB`
+   * reuses this scenario instead of piling up a new one per recommendation click. */
+  compareScenarioBId: string | undefined;
+  /** The time bar's A/B toggle (Tab key) - which side's frames the 3D scene/heat-map/Топ-N read. */
+  abSelected: AbSide;
+  abStatus: AbStatus;
+
   fps: number;
   vehiclesActive: number;
   vehicleCapacity: number;
@@ -208,10 +230,41 @@ export interface StoreState {
   upsertOverrideInActiveScenario(override: NetworkOverride): void;
   removeOverrideFromActiveScenario(kind: NetworkOverride["kind"], refId: string): void;
   importScenario(json: string): void;
+
+  /** Starts (or restarts) scenario B's background sim from that scenario's current overrides. */
+  startComparisonWithScenario(scenarioId: string): void;
+  /** Tears down B and returns the A/B toggle to "a"; A is never affected. */
+  stopComparison(): void;
+  setAbSelected(side: AbSide): void;
+  /** "Применить рекомендацию в Б" (docs/tasks/T-26 п.4): writes `overrides` into the dedicated B
+   * scenario (creating one on first use, named `label`, reusing it on later calls so recommendations
+   * accumulate instead of replacing each other) and (re)starts comparison with it. */
+  applyRecommendationToScenarioB(overrides: NetworkOverride[], label: string): void;
 }
 
 /** Cleans up the previous mount's subscriptions/timers before `bindViewport` attaches new ones. */
 let unbindPrevious: (() => void) | undefined;
+
+/**
+ * The comparison's own instance + subscriptions (docs/tasks/T-26), module-scoped like
+ * `unbindPrevious` above for the same reason: `useStore` is a singleton the whole app shares, so
+ * there is exactly one A/B comparison in flight at a time, and it must be torn down before a new
+ * one starts (a fresh recommendation applied to B) or whenever the *main* Viewport remounts (a
+ * network switch, "Перезапуск", a new "Запустить" scenario) - `abRunner`'s `simA`/`baseNetwork`
+ * would otherwise point at a Viewport instance that no longer exists.
+ */
+let abRunner: AbRunner | undefined;
+let offReportB: (() => void) | undefined;
+let reportTimerB: ReturnType<typeof setInterval> | undefined;
+
+function disposeComparison(): void {
+  offReportB?.();
+  offReportB = undefined;
+  if (reportTimerB !== undefined) clearInterval(reportTimerB);
+  reportTimerB = undefined;
+  abRunner?.dispose();
+  abRunner = undefined;
+}
 
 /**
  * The one place that remounts Viewport (T-23 review notes: every restart path must fold the draft
@@ -251,6 +304,11 @@ export const useStore = create<StoreState>()((set, get) => ({
   viewport: undefined,
   sim: undefined,
   report: undefined,
+  simB: undefined,
+  reportB: undefined,
+  compareScenarioBId: undefined,
+  abSelected: "a",
+  abStatus: "idle",
   fps: 0,
   vehiclesActive: 0,
   vehicleCapacity: initialRestartParams.vehicleBudget,
@@ -287,15 +345,21 @@ export const useStore = create<StoreState>()((set, get) => ({
   setSpeedFactor: (factor) => {
     set({ speedFactor: factor });
     if (get().playing) get().sim?.play(factor);
+    abRunner?.setSpeedFactor(factor);
   },
 
   togglePlay: () => {
     const { playing, sim, speedFactor } = get();
     const next = !playing;
     set({ playing: next });
-    if (!sim) return;
-    if (next) sim.play(speedFactor);
-    else sim.pause();
+    if (sim) {
+      if (next) sim.play(speedFactor);
+      else sim.pause();
+    }
+    // Comparison's own transport mirror (docs/tasks/T-26 п.1: "команда play обоим") - resets the
+    // sync loop's own pause bookkeeping too, since a deliberate global pause/resume is not the same
+    // event as the two sides drifting apart.
+    abRunner?.setPlaying(next, speedFactor);
   },
 
   setRuntimeParam: (key, value) => {
@@ -313,10 +377,18 @@ export const useStore = create<StoreState>()((set, get) => ({
 
   bindViewport: (handle) => {
     unbindPrevious?.();
+    // A fresh Viewport mount invalidates any running comparison: `abRunner` holds A's old
+    // `SimHandle` and `baseNetwork`, neither of which exist anymore (network switch, "Перезапуск",
+    // a new "Запустить" scenario all remount Viewport - see ui/App.tsx's `key={restartToken}`).
+    disposeComparison();
     set({
       viewport: handle,
       sim: undefined,
       report: undefined,
+      simB: undefined,
+      reportB: undefined,
+      abSelected: "a",
+      abStatus: "idle",
       fps: 0,
       vehiclesActive: 0,
       rtFactor: 1,
@@ -446,6 +518,69 @@ export const useStore = create<StoreState>()((set, get) => ({
       : [...get().scenarios, imported];
     persistScenarios(scenarios);
     set({ scenarios, activeScenarioId: imported.id });
+  },
+
+  startComparisonWithScenario: (scenarioId) => {
+    const { viewport } = get();
+    const simA = viewport?.getSim();
+    if (!viewport || !simA) return; // A isn't warmed up/playable yet - nothing to compare against
+    const overrides = get().scenarios.find((s) => s.id === scenarioId)?.overrides ?? [];
+
+    set({ compareScenarioBId: scenarioId, abStatus: "starting" });
+    if (!abRunner) {
+      const { startTimeMin, runtimeParams, appliedRestartParams } = get();
+      const configPatch = buildConfigPatch({
+        startTimeMin,
+        runtime: runtimeParams,
+        restart: appliedRestartParams,
+      });
+      abRunner = createAbRunner(viewport.baseNetwork, configPatch, simA, {
+        onStatusChange: (status) => set({ abStatus: status }),
+        onBReady: (sim) => {
+          offReportB?.();
+          if (reportTimerB !== undefined) clearInterval(reportTimerB);
+          set({ simB: sim, reportB: undefined });
+          if (get().abSelected === "b") viewport.setCompareSim(sim);
+          sim.requestReport();
+          reportTimerB = setInterval(() => sim.requestReport(), REPORT_POLL_INTERVAL_MS);
+          offReportB = sim.onReport((report) => set({ reportB: report }));
+        },
+      });
+    }
+    abRunner.startB(overrides, scenarioId).catch((error: unknown) => {
+      console.error("Comparison: failed to start scenario B", error);
+    });
+  },
+
+  stopComparison: () => {
+    disposeComparison();
+    get().viewport?.setCompareSim(undefined);
+    set({
+      simB: undefined,
+      reportB: undefined,
+      abSelected: "a",
+      abStatus: "idle",
+      compareScenarioBId: undefined,
+    });
+  },
+
+  setAbSelected: (side) => {
+    set({ abSelected: side });
+    const { viewport, simB } = get();
+    viewport?.setCompareSim(side === "b" ? simB : undefined);
+  },
+
+  applyRecommendationToScenarioB: (overrides, label) => {
+    const networkId = NETWORK_IDS[get().networkKey];
+    const existing = get().scenarios.find((s) => s.id === get().compareScenarioBId);
+    let scenario = existing ?? makeScenario(label, networkId);
+    for (const override of overrides) scenario = upsertOverride(scenario, override);
+    const scenarios = get().scenarios.some((s) => s.id === scenario.id)
+      ? replaceScenario(get().scenarios, scenario)
+      : [...get().scenarios, scenario];
+    persistScenarios(scenarios);
+    set({ scenarios });
+    get().startComparisonWithScenario(scenario.id);
   },
 }));
 

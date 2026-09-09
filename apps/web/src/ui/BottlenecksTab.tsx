@@ -100,10 +100,19 @@ function HeatmapLegend() {
 }
 
 export function BottlenecksTab() {
-  const report = useStore((s) => s.report);
+  const reportA = useStore((s) => s.report);
+  const reportB = useStore((s) => s.reportB);
+  // docs/tasks/T-26 п.2: the time bar's A/B toggle decides which scenario's report/heat-map this
+  // tab shows - "тепловая карта и Топ-N тоже [читают выбранного клиента]".
+  const abSelected = useStore((s) => s.abSelected);
+  const report = abSelected === "b" ? reportB : reportA;
+  const simA = useStore((s) => s.sim);
+  const simB = useStore((s) => s.simB);
+  const activeSim = abSelected === "b" ? simB : simA;
   const viewport = useStore((s) => s.viewport);
   const createScenario = useStore((s) => s.createScenario);
   const upsertOverrideInActiveScenario = useStore((s) => s.upsertOverrideInActiveScenario);
+  const applyRecommendationToScenarioB = useStore((s) => s.applyRecommendationToScenarioB);
 
   const [sortBy, setSortBy] = useState<SortKey>("vehH");
   const [expandedId, setExpandedId] = useState<string | undefined>(undefined);
@@ -144,7 +153,6 @@ export function BottlenecksTab() {
     if (!viewport) return;
     let disposed = false;
     let heatmap: HeatmapLayer | undefined;
-    let offMetrics: (() => void) | undefined;
 
     const newMarkers = buildBottleneckMarkers((item) => {
       setSelectedId(item.id);
@@ -154,6 +162,10 @@ export function BottlenecksTab() {
     viewport.engine.scene.add(newMarkers.group);
     setMarkers(newMarkers);
 
+    // Geometry is always built from A's segments (docs/tasks/T-26: the toggle switches which
+    // sim's *frames* are read, not the road/segment layout under them - see Viewport.tsx's
+    // `setCompareSim`). `sim.onMetrics` itself is subscribed by the effect below instead, keyed on
+    // whichever side (`activeSim`) is currently selected.
     const offSimReady = viewport.onSimReady((sim) => {
       if (disposed) return;
       heatmap = buildHeatmapLayer(viewport.network, sim.stats.segments);
@@ -162,20 +174,11 @@ export function BottlenecksTab() {
       heatmapRef.current = heatmap;
       segmentsRef.current = sim.stats.segments;
       speedRatioRef.current = new Float32Array(sim.stats.segments.length);
-
-      // The transferable MetricsFrame buffer is handed back to the worker right after this
-      // callback returns (see @atl/sim-worker's client.ts) - copy speedRatio out synchronously,
-      // both for the heat-map's own recolour below and for Minimap's independent redraw timer.
-      offMetrics = sim.onMetrics((frame) => {
-        speedRatioRef.current?.set(frame.speedRatio);
-        heatmapRef.current?.setSpeedRatios(speedRatioRef.current);
-      });
     });
 
     return () => {
       disposed = true;
       offSimReady();
-      offMetrics?.();
       viewport.engine.scene.remove(newMarkers.group);
       newMarkers.dispose();
       if (heatmap) {
@@ -188,6 +191,24 @@ export function BottlenecksTab() {
       speedRatioRef.current = undefined;
     };
   }, [viewport]);
+
+  // Recolours the heat-map from whichever side (A or B) is currently selected (docs/tasks/T-26
+  // п.2). Re-subscribes whenever the active sim changes (toggling A/B, or B becoming available for
+  // the first time) - the transferable MetricsFrame buffer is handed back to the worker right after
+  // this callback returns (@atl/sim-worker's client.ts), so speedRatio is copied out synchronously.
+  useEffect(() => {
+    if (!activeSim) return;
+    return activeSim.onMetrics((frame) => {
+      const dest = speedRatioRef.current;
+      if (!dest) return;
+      // A and B normally share the same segment layout (docs/tasks/T-19 review: most overrides,
+      // including a left-turn arrow, preserve every link/lane id) - a scenario that *does* relayout
+      // lanes could send a differently-sized speedRatio, which would just be skipped here rather
+      // than throw (Float32Array.set requires the source to fit).
+      if (frame.speedRatio.length <= dest.length) dest.set(frame.speedRatio);
+      heatmapRef.current?.setSpeedRatios(dest);
+    });
+  }, [activeSim]);
 
   // Rebuilds markers from the raw (server-ranked) report whenever it changes, or the selection does.
   useEffect(() => {
@@ -216,6 +237,17 @@ export function BottlenecksTab() {
     setAppliedByKey((prev) => ({ ...prev, [`${item.id}:${recIndex}`]: scenario?.name ?? "" }));
   };
 
+  // "Применить рекомендацию в Б" (docs/tasks/T-26 п.4): unlike `applyRecommendation` above, this
+  // never touches `activeScenarioId`/"Сценарии" - it writes into the dedicated comparison scenario
+  // (created on first use) and immediately (re)starts B with it, wiring straight into the "Сравнение"
+  // tab instead of the scenario editor.
+  const applyRecommendationToB = (item: BottleneckItem, recIndex: number): void => {
+    const rec = item.recommendations[recIndex];
+    if (!rec || rec.overrides.length === 0) return;
+    applyRecommendationToScenarioB(rec.overrides, ru.compareNewScenarioName(item.title));
+    setAppliedByKey((prev) => ({ ...prev, [`${item.id}:${recIndex}:b`]: "b" }));
+  };
+
   if (!report) {
     return (
       <div className="bottlenecks-tab">
@@ -226,6 +258,8 @@ export function BottlenecksTab() {
 
   return (
     <div className="bottlenecks-tab">
+      {abSelected === "b" && <p className="bottlenecks-ab-note">{ru.bottlenecksShowingB}</p>}
+
       <Sparkline report={report} />
 
       <section className="heatmap-controls">
@@ -315,6 +349,7 @@ export function BottlenecksTab() {
                           {item.recommendations.map((rec, recIndex) => {
                             const key = `${item.id}:${recIndex}`;
                             const appliedTo = appliedByKey[key];
+                            const appliedToB = appliedByKey[`${key}:b`] !== undefined;
                             return (
                               <li key={key} className="recommendation-item">
                                 <span className="recommendation-label">{rec.label}</span>
@@ -333,6 +368,18 @@ export function BottlenecksTab() {
                                   </button>
                                   <button
                                     type="button"
+                                    disabled={rec.overrides.length === 0}
+                                    title={
+                                      rec.overrides.length === 0
+                                        ? ru.bottlenecksApplyDisabledHint
+                                        : undefined
+                                    }
+                                    onClick={() => applyRecommendationToB(item, recIndex)}
+                                  >
+                                    {ru.compareApplyToB}
+                                  </button>
+                                  <button
+                                    type="button"
                                     className="show-btn"
                                     onClick={() => showItem(item)}
                                   >
@@ -343,6 +390,9 @@ export function BottlenecksTab() {
                                   <p className="recommendation-applied">
                                     {ru.bottlenecksApplied(appliedTo)}
                                   </p>
+                                )}
+                                {appliedToB && (
+                                  <p className="recommendation-applied">{ru.compareAppliedToB}</p>
                                 )}
                               </li>
                             );
