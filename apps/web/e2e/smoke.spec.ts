@@ -12,9 +12,15 @@ const FRAMES_TIMEOUT_MS = 15_000;
 test("app boots, renders frames and stays quiet in the console", async ({ page }) => {
   const consoleErrors: string[] = [];
   page.on("console", (message) => {
-    if (message.type() === "error") consoleErrors.push(message.text());
+    if (message.type() === "error") {
+      console.log("[DEBUG console:error]", message.text());
+      consoleErrors.push(message.text());
+    }
   });
-  page.on("pageerror", (error) => consoleErrors.push(error.message));
+  page.on("pageerror", (error) => {
+    console.log("[DEBUG pageerror]", error.message, error.stack);
+    consoleErrors.push(error.message);
+  });
 
   await page.goto("/");
   await expect(page.locator("canvas").first()).toBeVisible();
@@ -26,7 +32,7 @@ test("app boots, renders frames and stays quiet in the console", async ({ page }
         console.log(`[DEBUG] t=${Date.now()} frames=${f}`);
         return f;
       },
-      { timeout: FRAMES_TIMEOUT_MS },
+      { timeout: FRAMES_TIMEOUT_MS, intervals: [250] },
     )
     .toBeGreaterThanOrEqual(MIN_FRAMES);
 
