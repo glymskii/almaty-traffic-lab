@@ -4,7 +4,6 @@ import {
   type LeftTurnMode,
   type Link,
   type Network,
-  type NetworkOverride,
   type Protection,
   parseNetwork,
   type SegmentDescriptor,
@@ -1984,11 +1983,6 @@ export function approachSegments(
     }
   }
   return segments;
-}
-
-/** Convenience: apply overrides to a synthetic network (delegates to map-data once T-24 lands). */
-export function withOverrides(_net: Network, _overrides: NetworkOverride[]): Network {
-  throw new Error("not implemented: see docs/tasks/T-24-scenario-editor.md");
 }
 
 /** Validate strictly; builders must never emit inconsistent networks. */
