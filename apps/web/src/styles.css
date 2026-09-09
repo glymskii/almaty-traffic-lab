@@ -288,6 +288,34 @@ body {
   background: #3a7bd5;
 }
 
+/* --- A/B toggle (T-26) --- */
+
+.ab-toggle-group {
+  display: flex;
+  gap: 2px;
+}
+
+.ab-toggle-btn {
+  background: transparent;
+  color: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.ab-toggle-btn.active {
+  background: #3a7bd5;
+  border-color: #3a7bd5;
+}
+
+.ab-toggle-starting {
+  font-size: 12px;
+  color: #b7b39c;
+  white-space: nowrap;
+}
+
 /* --- HUD (T-23) --- */
 
 .hud-layer {
@@ -521,6 +549,13 @@ body {
 .bottlenecks-empty {
   font-size: 12px;
   opacity: 0.75;
+}
+
+.bottlenecks-ab-note {
+  font-size: 12px;
+  padding: 4px 8px;
+  background: rgba(58, 123, 213, 0.2);
+  border-radius: 4px;
 }
 
 /* CSS2DRenderer's own root has pointer-events:none (scene/labels.ts) so it never steals map clicks;
@@ -855,4 +890,111 @@ body {
   background: rgba(255, 255, 255, 0.06);
   border-radius: 4px;
   cursor: pointer;
+}
+
+/* --- Compare tab (T-26) --- */
+
+.compare-tab > * {
+  margin-bottom: 14px;
+}
+
+.compare-intro {
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.compare-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.compare-scenario-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  flex: 1 1 auto;
+}
+
+.compare-scenario-picker select {
+  padding: 4px;
+}
+
+.compare-totals-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.compare-totals-table th,
+.compare-totals-table td {
+  text-align: left;
+  padding: 4px 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.compare-delta.good {
+  color: #8fd19e;
+}
+
+.compare-delta.bad {
+  color: #e0836f;
+}
+
+.compare-delta.neutral {
+  opacity: 0.7;
+}
+
+.compare-topn-row-group {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.compare-topn,
+.compare-diff-group {
+  flex: 1 1 200px;
+}
+
+.compare-topn-list,
+.compare-diff-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.compare-topn-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.compare-topn-title {
+  background: transparent;
+  color: inherit;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline;
+  flex: 1 1 auto;
+  font-size: 12px;
+}
+
+.compare-moved-from {
+  font-size: 11px;
+  opacity: 0.7;
+  margin-left: 4px;
+}
+
+.compare-diff-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }

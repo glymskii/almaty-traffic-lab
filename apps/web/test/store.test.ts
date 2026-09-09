@@ -1,5 +1,5 @@
 import { RUNTIME_SAFE_PARAM_PATHS } from "@atl/contracts";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildConfigPatch,
   flattenedRuntimeSafePaths,
@@ -265,5 +265,64 @@ describe("useStore scenario actions (docs/tasks/T-24)", () => {
   it("setSelection stores the clicked map object", () => {
     useStore.getState().setSelection({ kind: "link", id: "l0" });
     expect(useStore.getState().selection).toEqual({ kind: "link", id: "l0" });
+  });
+});
+
+describe("useStore A/B comparison actions (docs/tasks/T-26)", () => {
+  it("startComparisonWithScenario is a no-op before Viewport/A's sim exist", () => {
+    useStore.getState().startComparisonWithScenario("some-scenario");
+    const state = useStore.getState();
+    expect(state.simB).toBeUndefined();
+    expect(state.abStatus).toBe("idle");
+  });
+
+  it("setAbSelected updates the toggle and forwards the pick to viewport.setCompareSim", () => {
+    const setCompareSim = vi.fn();
+    useStore.setState({
+      viewport: { setCompareSim } as unknown as ReturnType<typeof useStore.getState>["viewport"],
+    });
+    useStore.getState().setAbSelected("b");
+    expect(useStore.getState().abSelected).toBe("b");
+    expect(setCompareSim).toHaveBeenCalledWith(undefined); // simB isn't running in this test
+  });
+
+  it("stopComparison resets every A/B field even with no comparison running", () => {
+    useStore.setState({ abSelected: "b", abStatus: "starting", compareScenarioBId: "x" });
+    useStore.getState().stopComparison();
+    const state = useStore.getState();
+    expect(state.simB).toBeUndefined();
+    expect(state.reportB).toBeUndefined();
+    expect(state.abSelected).toBe("a");
+    expect(state.abStatus).toBe("idle");
+    expect(state.compareScenarioBId).toBeUndefined();
+  });
+
+  it("applyRecommendationToScenarioB writes into a dedicated scenario without touching activeScenarioId/appliedScenarioId", () => {
+    const override = { kind: "link", linkId: "l0", set: { generalLanes: 3 } } as const;
+    useStore.getState().applyRecommendationToScenarioB([override], "Сравнение: Улица l0");
+    const state = useStore.getState();
+    expect(state.scenarios).toHaveLength(1);
+    expect(state.scenarios[0]?.name).toBe("Сравнение: Улица l0");
+    expect(state.scenarios[0]?.overrides).toEqual([override]);
+    // Unlike BottlenecksTab's `applyRecommendation` (which edits activeScenarioId), this path is
+    // entirely separate from the "Сценарии" tab's own editing target.
+    expect(state.activeScenarioId).toBe("baseline");
+    expect(state.appliedScenarioId).toBe("baseline");
+  });
+
+  it("applyRecommendationToScenarioB reuses the existing B scenario (by compareScenarioBId) instead of creating a new one each time", () => {
+    const first = { kind: "link", linkId: "l0", set: { generalLanes: 3 } } as const;
+    useStore.getState().applyRecommendationToScenarioB([first], "Сравнение: Первая");
+    const scenarioId = useStore.getState().scenarios[0]?.id as string;
+    // Simulates startComparisonWithScenario having actually run and recorded which scenario B is
+    // (skipped here since it needs a real Viewport/sim - see the no-op test above).
+    useStore.setState({ compareScenarioBId: scenarioId });
+
+    const second = { kind: "link", linkId: "l1", set: { speedLimitKph: 40 } } as const;
+    useStore.getState().applyRecommendationToScenarioB([second], "Сравнение: Вторая");
+    const state = useStore.getState();
+    expect(state.scenarios).toHaveLength(1); // still one scenario, not two
+    expect(state.scenarios[0]?.id).toBe(scenarioId);
+    expect(state.scenarios[0]?.overrides).toEqual([first, second]);
   });
 });

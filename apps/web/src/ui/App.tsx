@@ -3,6 +3,7 @@ import { ru } from "../i18n/ru.ts";
 import { buildConfigPatch, NETWORK_IDS, type TabKey, useStore } from "../state/store.ts";
 import { Viewport } from "../Viewport.tsx";
 import { BottlenecksTab } from "./BottlenecksTab.tsx";
+import { CompareTab } from "./CompareTab.tsx";
 import { Hud } from "./Hud.tsx";
 import { Layout } from "./Layout.tsx";
 import { OverviewTab } from "./OverviewTab.tsx";
@@ -17,10 +18,8 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "compare", label: ru.tabCompare },
 ];
 
-/** The last tab is built in a later task; T-23 wired up navigation, T-24 filled in "Сценарии", T-25 fills in "Узкие места". */
-const STUB_TASK_ID: Partial<Record<TabKey, string>> = {
-  compare: "T-26",
-};
+/** T-23 wired up navigation; T-24/T-25/T-26 filled in the rest, in order - no stub tabs remain. */
+const STUB_TASK_ID: Partial<Record<TabKey, string>> = {};
 
 function SidePanel() {
   const activeTab = useStore((s) => s.activeTab);
@@ -48,6 +47,7 @@ function SidePanel() {
         {activeTab === "overview" && <OverviewTab />}
         {activeTab === "bottlenecks" && <BottlenecksTab />}
         {activeTab === "scenarios" && <ScenariosTab />}
+        {activeTab === "compare" && <CompareTab />}
         {stubTaskId !== undefined && <p className="tab-stub">{ru.comingSoon(stubTaskId)}</p>}
       </div>
     </div>
