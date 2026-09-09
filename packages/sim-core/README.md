@@ -238,6 +238,77 @@
   (`insert`), удаление (`remove`), страховочная сортировка вставками (`sortTrack`).
 - Свободные слоты: LIFO-стек, `highWater` — верхняя граница занятых слотов, порядок обработки — по индексу слота.
 
+### Аудит `driver.*` / `vehicleClasses.*` / `behavior.*` (T-21)
+Каждое распределение `DriverParams` реально сэмплируется в `sampleDriverInto` (`models/driver.ts`, фиксированный
+порядок черпания из `driverRng`) и используется как минимум в одном месте ядра — таблица ниже проверяет это
+поле за полем (закрывает пункт 1 карточки T-21). «Где используется» — не полный список всех чтений, а
+представительный набор мест, где значение действительно меняет решение.
+
+| Параметр | Поле `VehiclePool` | Где используется | Примечание |
+|---|---|---|---|
+| `driver.desiredSpeedFactor` | `speedFactor` | `v0` (желаемая скорость) во всех обращениях к IDM, спавне, метриках; см. N03 | множится на `vehicleClasses[cls].desiredSpeedFactor` |
+| `driver.timeHeadwayS` | `timeHeadway` | `models/idm.ts` (`s*` — безопасный временной интервал `T`); скорость входа при появлении | |
+| `driver.minGapM` | `minGap` | `models/idm.ts` (`s0`); переполнение кармана и конец полосы (`simulation.ts`); скорость входа при появлении; `transit/stops.ts` (место для остановки в кармане) | |
+| `driver.politeness` | `politeness` | `mobilIncentive` (`models/mobil.ts`, вызывается из `simulation.ts`) — вес выигрыша последователей в стимуле перестроения | нужен дискретизационный (не обязательный) манёвр, см. `test/models/driver-heterogeneity.test.ts` |
+| `driver.laneChangeThresholdMps2` | `laneChangeThreshold` | `a_thr` в сравнении со стимулом перестроения (`simulation.ts`, рядом с `mobilIncentive`) | |
+| `driver.criticalGapLeftTurnS` | `gapLeftTurn` | `conflictStopDistance` (`simulation.ts`) для точек конфликта разрешённого левого | |
+| `driver.criticalGapMergeS` | `gapMerge` | `conflictStopDistance` (`simulation.ts`) для точек конфликта слияния/уступки не-левого движения | на синтетических фикстурах (`mergeRamp()`, магистраль 80 км/ч; `tJunction()`/`crossroads()`, 50 км/ч) заданный по умолчанию диапазон `[2.5, 5.0]` c реальными демо-сценариями не пересекает достижимое `threatTimeS` (ограничено `APPROACH_SCAN_M = 40` м, `runtime/intersections.ts`) — то же ограничение, что T-11 уже отметил у `criticalGapLeftTurnS` на насыщённом `crossroads()` (docs/NUANCES.md, N19). Поле рабочее (тест доказывает это на диапазоне ниже дефолтного), но калибровка константы вне объёма T-21 |
+| `driver.criticalGapPedestrianS` | `gapPedestrian` | Препятствие «пешеходный переход» (`simulation.ts`), `pedestrians/crosswalks.ts` (`threatTimeS`) | |
+| `vehicleClasses.<cls>.lengthM` | `length` | Занимаемое место `[s-length, s]`, зазоры, `s0` при появлении | |
+| `vehicleClasses.<cls>.widthM` | — | не используется в `sim-core` | геометрия только для рендера (`apps/web`); в ядре не нужна |
+| `vehicleClasses.<cls>.maxAccelMps2` | `maxAccel` | `models/idm.ts` (`a_max`) | |
+| `vehicleClasses.<cls>.comfortDecelMps2` | `comfortDecel` | `models/idm.ts` (`b`, комфортное торможение), `mustStopAtYellow` | |
+| `vehicleClasses.<cls>.desiredSpeedFactor` | множитель `speedFactor` | см. `driver.desiredSpeedFactor` выше | у автобуса/троллейбуса < 1 — едут медленнее по умолчанию |
+| `vehicleClasses.<cls>.occupancyPeak`/`occupancyOffpeak` | `occupancy` | `despawn` → `personDelayS`/`personDelayByClass` (T-18, N23) | пишется по часу **окончания** поездки |
+| `behavior.gridlockDiscipline` | бит в `gridlockDisciplined` (не в `VehiclePool`) | Препятствие `downstream_spillback` перед въездом на коннектор (`simulation.ts`); см. N19 | RUNTIME_SAFE — жребий при появлении читает `this.cfg` заново, см. ниже |
+| `behavior.busLaneViolatorShare` | бит `BUS_LANE_VIOLATOR` в `persistentFlags` | `lanes.admitsAt` (`runtime/lanes.ts`) — допуск на выделенку; см. N16 | RUNTIME_SAFE, аналогично |
+| `behavior.taxisAllowedInBusLanes` | — (читается один раз в `LaneRuntime`) | `runtime/lanes.ts` (`admitsAt`) | не RUNTIME_SAFE — сценарный тумблер, не гетерогенность водителя |
+| `behavior.busDwellS`/`busDwellPeakFactor` | — (используется в `transit/rules.ts`) | `transit/stops.ts` — длительность стоянки | |
+| `behavior.laneSelectionLookaheadM` | — | `mandatoryBias` (`simulation.ts`) — дистанция начала обязательного перестроения | |
+
+**Gridlock и нарушители пересэмплируются только для новых машин (пункт 2 карточки T-21).** `place()`/`placeBus()`
+разыгрывают `gridlockDisciplined[i]`/`BUS_LANE_VIOLATOR` при появлении, читая `this.cfg.behavior.*` в момент
+розыгрыша — а `setParams` (см. «Выходы» ниже) заменяет `this.cfg` целиком, а не патчит поле точечно. Поэтому
+смена `behavior.gridlockDiscipline`/`behavior.busLaneViolatorShare` через `setParams` подхватывается со
+следующего появления и не трогает уже едущие машины: их бит/флаг был записан один раз при их собственном
+появлении и с тех пор не перечитывается. Проверено `test/nuances/08-runtime-invariants.test.ts` (N25):
+после смены параметра каждая ещё активная (появившаяся раньше) машина сохраняет старое значение, а каждая
+появившаяся после смены получает новое — `chance(0)`/`chance(1)` детерминированы, так что тест не полагается
+на конкретный сид.
+
+### `runtime/invariants.ts`: инварианты в debug-режиме (T-21)
+`config.debugInvariants` (по умолчанию `false`, включается сценарием или тестом) подключает две проверки к
+`step()`, обе бросают `InvariantViolationError` с контекстом (шаг, слот, id, трек) на первом же нарушении
+вместо тихого исправления или продолжения с испорченным состоянием:
+- `checkInvariants(pool, runtime, visited, simTimeS)` — в конце `step()` (после `updatePositions`): нет
+  `NaN`/`Infinity` в `s/v/a/x/y`, скорость в `[0, 1,5·v0 + 0,5]`, `s` в границах трека (± `1e-2` м на
+  плавающую точку), каждая активная машина ровно в одном списке трека (`pool.trackTail/ahead`), и зазор до
+  лидера не хуже `GAP_TOLERANCE_M`. `visited` — буфер-скретч размера `pool.capacity`, который
+  `SimulationImpl` держит одним полем на всё время жизни симуляции, чтобы включение флага не добавляло
+  аллокаций в `step()`.
+- `checkTrackOrder(pool, track, simTimeS)` — замена `pool.sortTrack` внутри `repairOrder()` (заметка T-04):
+  тот же проход хвост→голова и то же исправление (`swapWithAhead`) для обычного пересечения, но при
+  пересечении хуже `GAP_TOLERANCE_M` — исключение вместо тихого исправления. Обычное (в пределах допуска)
+  пересечение не редкость и не баг, это то же самое известное свойство дискретного шага, что и ниже; редкое
+  пересечение вне допуска — уже настоящая порча состояния, и `sortTrack` иначе исправил бы её незаметно, до
+  того как `checkInvariants` вообще успел бы её увидеть.
+
+**`GAP_TOLERANCE_M = −6` м, а не 0.** Карточка T-04 требует «зазор ≥ 0 и нет наложений», и после реализации
+инвариантов — вернуть допуск к неотрицательному либо задокументировать число. Возвращать к 0 нельзя: T-22
+нашёл на насыщенном `crossroads()` воспроизводимый (не редкий, не шумовой) разрыв до −4,5 м, отдельный от
+известного «на несколько дециметров ближе `s0`» свойства IDM выше. Причина — не физика IDM, а рассинхрон
+между просмотром препятствий и фактическим выбором коннектора: машина, не успевшая завершить обязательную
+перестройку (T-10), на границе полоса → коннектор попадает по `enterLink`/`detourConnector`
+(`simulation.ts`) на коннектор, которого не видел бесплатный upstream-просмотр в `computeAccelerations` (тот
+читает `pool.nextTrack`, всё ещё указывающий на другой коннектор), и въезжает в уже занятый коннектор почти
+на пределе скорости — `IDM_MAX_DECEL` (8 м/с²) не успевает погасить разрыв за один шаг `dtS`. Перебор
+`crossroads({lanes})` × `lanes ∈ {1,2,3}` × `demand.multiplier ∈ {1.0,1.3,1.6}` × `seed ∈ {1,2,3}` (T-22) ни
+разу не превысил ≈ −4,5 м — величина стабильно воспроизводимая, а не выброс, поэтому допуск зафиксирован с
+запасом (−6 м) вместо точечного исправления: то же самое звено логики калибрует N02/N05/N07/N09/N10/N11/N14,
+и точечная правка рискует ими всеми. Исправление — сделать так, чтобы просмотр препятствий и
+`detourConnector` соглашались, какой коннектор фактический, — вне объёма T-21 (см. отчёт задачи,
+`decisionsNeeded`/`notesForOtherTasks`). Подробный разбор — `docs/NUANCES.md`, N26 и «Заметка T-22: N26».
+
 ### `metrics/*`: сегменты, корневые причины, окно, totals (T-18)
 Метрики — чистый наблюдатель: они не влияют ни на одну машину, поэтому строятся последними и снимаются
 в самом конце шага.
@@ -687,16 +758,28 @@ true, leftTurnMode: "protected"})` с принудительным правым 
 допуска, см. `docs/NUANCES.md`; смещения `i·spacingM/(0,9·speedLimit)` дают 28–41% меньше остановок на
 машину на сетке `lanes×demand×seed`, порог теста 25%), вторую проверку N09 (тот же сценарий, что уже
 зелёный N24: доля `pocket_spillback` на `N.in:center` в `report()` заведомо выше порога 20%, у N24 порог
-40%) и N26 (инварианты снаружи через `kernelOf`: нет NaN/Infinity, скорость в `[0, 1,5·v0]`, каждая машина
-ровно в одном списке трека, зазор между соседями не хуже -6 м). Допуск зазора в N26 — не 0: `debugInvariants`
-(`contracts/src/sim-config.ts`) остаётся полем контракта без потребителя в ядре (обещанный T-21
-`runtime/invariants.ts` так и не появился), и тест обнаружил воспроизводимый (не редкий) разрыв до ~-4,5 м —
-машина, не успевшая завершить обязательную перестройку (T-10), на границе полоса → коннектор попадает по
-`enterLink`/`detourConnector` (`simulation.ts`) на коннектор, которого не видел бесплатный upstream-просмотр
-препятствий в `computeAccelerations` (тот читает `pool.nextTrack`, ещё указывающий на другой коннектор), и
-въезжает в уже занятый коннектор почти на пределе скорости — `IDM_MAX_DECEL` (8 м/с²) не успевает погасить
-разрыв за один шаг `dtS`. Подробности и почему это не чинилось в рамках T-22 — в `docs/NUANCES.md`,
-раздел «Заметка T-22: N26».
+40%) и N26 (инварианты). **N26 после T-21 проверяется движком, а не тестом**: `runtime/invariants.ts`
+(`checkInvariants`, `checkTrackOrder`) реализует ровно то, что раньше обходило списки полос вручную внутри
+`08-runtime-invariants.test.ts`, и подключено к `step()` за флагом `config.debugInvariants` — см. раздел
+«`runtime/invariants.ts`: инварианты в debug-режиме (T-21)» ниже. Сам тест теперь просто включает флаг и
+гоняет 10 сим-минут насыщенного `crossroads()`, ожидая, что `runUntil` не бросит исключение. Тот же файл
+добавил в N25 два теста ресэмплинга: `behavior.gridlockDiscipline`/`behavior.busLaneViolatorShare` меняются
+через `setParams` только для машин, появившихся после смены (см. таблицу выше).
+
+`test/models/driver-heterogeneity.test.ts` (T-21) — по одному тесту на каждое оставшееся (не N03)
+распределение `DriverParams`: `sd = 0` против `sd > 0` при прочих равных (тот же сид, та же сеть) даёт разный
+`trajectoryHash()` на сценарии, который действительно упирается в механизм этого поля (следование за лидером
+для `timeHeadwayS`/`minGapM`, дискретизационное перестроение без обязательности для `politeness`/
+`laneChangeThresholdMps2`, принудительный левый на `crossroads({leftTurnMode: "permissive"})` для
+`criticalGapLeftTurnS`, `mergeRamp()` с перегруженным съездом для `criticalGapMergeS`, вынужденный правый
+через занятую пешеходами зебру для `criticalGapPedestrianS`). `Rng.sample` тратит одинаковое число `float()`
+независимо от `sd` (см. `rng.ts`), поэтому расхождение объясняется только сэмплируемым полем, а не сдвигом
+потока случайности. `criticalGapMergeS` — единственный тест не на дефолтном диапазоне схемы, см. таблицу выше
+и комментарий в самом тесте.
+
+**Фикстуры `test/fixtures/builders.ts`.** `withOverrides()` (мёртвая заглушка, бросала `not implemented`,
+никем не вызывалась) убрана T-21 по прямому указанию ревью; сценарный редактор (T-24) применяет overrides
+через `map-data`, а не через этот файл.
 
 **Фикстуры перекрёстка.** У `crossroads()` и `tJunction()` есть настоящая «коробка» узла: стоп-линии отодвинуты
 от центра на `junctionRadiusM = (полос + 1)·3,5 м`, а две проезжие части каждого подхода разведены в стороны

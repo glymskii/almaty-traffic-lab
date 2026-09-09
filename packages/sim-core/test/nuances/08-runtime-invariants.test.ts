@@ -1,8 +1,9 @@
 /**
  * Nuance tests N25-N27: runtime parameters, invariants, performance. Closed by T-04/T-06 (N25), T-21 (N26), T-28 (N27).
  */
-import { defaultSimConfig, RUNTIME_SAFE_PARAM_PATHS } from "@atl/contracts";
+import { defaultSimConfig, RUNTIME_SAFE_PARAM_PATHS, VehicleFlag } from "@atl/contracts";
 import { describe, expect, it } from "vitest";
+import { GAP_TOLERANCE_M } from "../../src/runtime/invariants.ts";
 import { createSimulation, kernelOf } from "../../src/simulation.ts";
 import { crossroads, saturationMultiplier, straightRoad } from "../fixtures/builders.ts";
 
@@ -52,29 +53,113 @@ describe("N25 runtime parameters", () => {
     const entered = sim.tripStats().total.spawned - before;
     expect(entered).toBeLessThanOrEqual(1800 / 60);
   });
+
+  /**
+   * Both `behavior.gridlockDiscipline` and `behavior.busLaneViolatorShare` are per-driver traits
+   * drawn once at spawn (`place()`/`placeBus()`, simulation.ts) from whatever `this.cfg.behavior`
+   * holds *at that moment* -- and `setParams` replaces `this.cfg` wholesale. So a vehicle already on
+   * the road keeps the value it was drawn with for its whole trip; only a vehicle spawned after the
+   * change ever sees the new one. `chance(0)`/`chance(1)` are exact (never below/always below 1), so
+   * this does not need many samples or a tolerance to be a clean test.
+   */
+  it("gridlockDiscipline resamples only for vehicles spawned after setParams; existing ones keep theirs", () => {
+    const network = straightRoad({ lengthM: 2000, lanes: 1 });
+    const config = defaultSimConfig({
+      seed: 1,
+      behavior: { gridlockDiscipline: 0 },
+      demand: { tripsPerHourPeak: 600, warmupMinutes: 0 },
+    });
+    const sim = createSimulation({ network, config });
+    const { pool, gridlockDisciplined } = kernelOf(sim);
+
+    sim.runUntil(60);
+    const before = new Map<number, number>();
+    for (let i = 0; i < pool.highWater; i++) {
+      if ((pool.track[i] as number) < 0) continue;
+      before.set(pool.id[i] as number, gridlockDisciplined[i] as number);
+    }
+    expect(before.size).toBeGreaterThan(0);
+    for (const disc of before.values()) expect(disc).toBe(0);
+
+    sim.setParams({ behavior: { gridlockDiscipline: 1 } });
+    sim.runUntil(120);
+
+    let survivors = 0;
+    let freshlySpawned = 0;
+    for (let i = 0; i < pool.highWater; i++) {
+      if ((pool.track[i] as number) < 0) continue;
+      const id = pool.id[i] as number;
+      const disc = gridlockDisciplined[i] as number;
+      const wasBefore = before.get(id);
+      if (wasBefore !== undefined) {
+        survivors++;
+        expect(disc).toBe(wasBefore); // untouched by the parameter change
+      } else {
+        freshlySpawned++;
+        expect(disc).toBe(1); // drawn under the new value
+      }
+    }
+    expect(survivors).toBeGreaterThan(0);
+    expect(freshlySpawned).toBeGreaterThan(0);
+  });
+
+  it("busLaneViolatorShare resamples only for vehicles spawned after setParams; existing ones keep theirs", () => {
+    const network = straightRoad({ lengthM: 2000, lanes: 1 });
+    const config = defaultSimConfig({
+      seed: 2,
+      behavior: { busLaneViolatorShare: 0 },
+      demand: { tripsPerHourPeak: 600, warmupMinutes: 0 },
+    });
+    const sim = createSimulation({ network, config });
+    const { pool } = kernelOf(sim);
+    const isViolator = (i: number) =>
+      ((pool.persistentFlags[i] as number) & VehicleFlag.BUS_LANE_VIOLATOR) !== 0;
+
+    sim.runUntil(60);
+    const before = new Map<number, boolean>();
+    for (let i = 0; i < pool.highWater; i++) {
+      if ((pool.track[i] as number) < 0) continue;
+      before.set(pool.id[i] as number, isViolator(i));
+    }
+    expect(before.size).toBeGreaterThan(0);
+    for (const violator of before.values()) expect(violator).toBe(false);
+
+    sim.setParams({ behavior: { busLaneViolatorShare: 1 } });
+    sim.runUntil(120);
+
+    let survivors = 0;
+    let freshlySpawned = 0;
+    for (let i = 0; i < pool.highWater; i++) {
+      if ((pool.track[i] as number) < 0) continue;
+      const id = pool.id[i] as number;
+      const violator = isViolator(i);
+      const wasBefore = before.get(id);
+      if (wasBefore !== undefined) {
+        survivors++;
+        expect(violator).toBe(wasBefore); // untouched by the parameter change
+      } else {
+        freshlySpawned++;
+        expect(violator).toBe(true); // drawn under the new value (cars and taxis only, both spawn here)
+      }
+    }
+    expect(survivors).toBeGreaterThan(0);
+    expect(freshlySpawned).toBeGreaterThan(0);
+  });
 });
 
 describe("N26 invariants", () => {
   /**
-   * Below this gap (metres, bumper-to-bumper) a step is a genuine corruption, not the known transient
-   * this fixture reproduces: a vehicle that reaches a lane/connector boundary still needing a
-   * mandatory lane change it never completed falls back to the first connector `enterLink`'s
-   * `detourConnector` finds reachable, which the free-flow lookahead in `computeAccelerations`
-   * (obstacle "the leader on this track, or the first vehicle on the tracks ahead") does not
-   * necessarily know about beforehand -- it only sees `pool.nextTrack`, which may still name the
-   * *original* connector the vehicle never actually used. Discovered while writing this test: a
-   * vehicle can arrive at the junction still near the speed limit with no warning, and `IDM_MAX_DECEL`
-   * (models/idm.ts, 8 m/s^2) is not always enough to stop clear of an already-queued leader within one
-   * `dtS` step. A sweep of `crossroads({lanes})` x `lanes` in [1,2,3] x demand multiplier in
-   * [1.0,1.3,1.6] x seed in [1,2,3] never exceeded about -4.5 m; the tolerance below leaves margin for
-   * that characterised, reproducible gap while still failing on unbounded overlap, NaN or a list
-   * desync. See docs/NUANCES.md (N26) and the T-22 report for the full trace; fixing the lookahead to
-   * follow the same fallback `advanceTrack` actually takes is future work, not in this task's scope.
+   * `checkInvariants` (`runtime/invariants.ts`) now does the actual checking, wired into `step()`
+   * behind `config.debugInvariants`; this test only has to run 10 saturated sim-minutes with the
+   * flag on and confirm the engine raises nothing. `GAP_TOLERANCE_M` (imported above, not redefined
+   * here) is why a merely negative bumper gap does not fail this test on its own -- see that
+   * module's doc comment and docs/NUANCES.md (N26) for the characterised, reproducible transient
+   * (a mandatory-lane-change fallback landing on a different connector than the free-flow lookahead
+   * used) it accounts for.
    */
-  const GAP_TOLERANCE_M = -6;
   const RUN_S = 600;
 
-  it("10 sim-minutes of saturated crossroads: no NaN, no double-listed vehicle, gaps stay within tolerance", () => {
+  it("10 sim-minutes of saturated crossroads with debugInvariants: true raises no exception", () => {
     const net = crossroads();
     const config = defaultSimConfig({
       seed: 1,
@@ -86,68 +171,34 @@ describe("N26 invariants", () => {
       debugInvariants: true,
     });
     const sim = createSimulation({ network: net, config });
-    const { runtime, pool } = kernelOf(sim);
-    const visited = new Uint8Array(pool.capacity);
-    let steps = 0;
+    expect(config.debugInvariants).toBe(true);
+    expect(GAP_TOLERANCE_M).toBeLessThan(0);
 
-    // Plain `if (...) throw` rather than a per-item `expect(...)`: this walks every active vehicle
-    // and every track's list on every one of 6000 steps, and vitest's assertion machinery is heavy
-    // enough per call to blow the suite's time budget at that volume. A thrown Error fails the test
-    // exactly the same way, with the offending step and slot in the message.
-    while (sim.simTimeS < RUN_S) {
-      sim.step();
-      steps++;
-      const t = sim.simTimeS;
+    expect(() => sim.runUntil(RUN_S)).not.toThrow();
 
-      let activeCount = 0;
-      for (let i = 0; i < pool.highWater; i++) {
-        if ((pool.track[i] as number) < 0) continue;
-        activeCount++;
-        const v = pool.v[i] as number;
-        if (
-          !Number.isFinite(v) ||
-          !Number.isFinite(pool.s[i] as number) ||
-          !Number.isFinite(pool.a[i] as number)
-        ) {
-          throw new Error(`non-finite state at slot ${i}, t=${t}`);
-        }
-        if (v < 0) throw new Error(`negative speed at slot ${i}, t=${t}: v=${v}`);
-        const track = pool.track[i] as number;
-        const v0 = (runtime.trackSpeedMps[track] as number) * (pool.speedFactor[i] as number);
-        if (v > v0 * 1.5 + 0.5) {
-          throw new Error(`speed above 1.5x desired at slot ${i}, t=${t}: v=${v} v0=${v0}`);
-        }
-      }
-
-      // Every active vehicle sits in exactly one track's ordered list, and consecutive vehicles on
-      // a list never drift past the known transient (T-04's "no overlap" invariant, N26).
-      visited.fill(0);
-      let visitedCount = 0;
-      for (let track = 0; track < runtime.trackCount; track++) {
-        let i = pool.trackTail[track] as number;
-        while (i >= 0) {
-          if (visited[i] === 1) throw new Error(`slot ${i} listed twice, t=${t} track=${track}`);
-          visited[i] = 1;
-          visitedCount++;
-          const leader = pool.ahead[i] as number;
-          if (leader >= 0) {
-            const gap =
-              (pool.s[leader] as number) - (pool.length[leader] as number) - (pool.s[i] as number);
-            if (gap <= GAP_TOLERANCE_M) {
-              throw new Error(`gap ${gap.toFixed(3)} below tolerance on track ${track}, t=${t}`);
-            }
-          }
-          i = leader;
-        }
-      }
-      if (visitedCount !== activeCount) {
-        throw new Error(`visited ${visitedCount} !== active ${activeCount} vehicles, t=${t}`);
-      }
-    }
-
-    expect(steps).toBe(Math.round(RUN_S / config.dtS));
+    expect(sim.simTimeS).toBeGreaterThanOrEqual(RUN_S);
     expect(kernelOf(sim).droppedVehicles).toBe(0);
   }, 30_000);
+
+  it("debugInvariants: false (default) never runs the check, same trajectory either way while healthy", () => {
+    function run(debugInvariants: boolean) {
+      const net = crossroads();
+      const config = defaultSimConfig({
+        seed: 2,
+        demand: { tripsPerHourPeak: 1800, warmupMinutes: 1, vehicleBudget: 2000 },
+        debugInvariants,
+      });
+      const sim = createSimulation({ network: net, config });
+      sim.runUntil(180);
+      return sim;
+    }
+    expect(defaultSimConfig().debugInvariants).toBe(false);
+    const off = run(false);
+    const on = run(true);
+    // The checks are read-only: turning them on changes nothing about the simulated trajectory.
+    expect(on.trajectoryHash()).toBe(off.trajectoryHash());
+    expect(on.tripStats()).toEqual(off.tripStats());
+  });
 });
 
 describe("N27 performance", () => {

@@ -38,6 +38,7 @@ import { RoutingGraph } from "./routing/graph.ts";
 import { ROUTE_COPIES, RouteTrees } from "./routing/trees.ts";
 import { SimClock } from "./runtime/clock.ts";
 import { IntersectionRuntime } from "./runtime/intersections.ts";
+import { checkInvariants, checkTrackOrder } from "./runtime/invariants.ts";
 import { LaneRuntime } from "./runtime/lanes.ts";
 import { yieldCauseByTurn } from "./runtime/merges.ts";
 import { CLASS_COUNT, RuntimeNetwork } from "./runtime/network.ts";
@@ -394,6 +395,8 @@ class SimulationImpl implements Simulation {
   private readonly laneChangeBlocked: Uint8Array;
   /** See SimulationKernel.gridlockDisciplined; drawn once per vehicle at spawn (T-11). */
   readonly gridlockDisciplined: Uint8Array;
+  /** Scratch for `checkInvariants` (T-21): sized once to `pool.capacity` so debug mode never allocates. */
+  private readonly invariantsVisited: Uint8Array;
   /** Reason the first blocking conflict point of `conflictStopDistance` is closed; scratch, not state. */
   private conflictCause = 0;
   /** [link * TURN_COUNT + turn] -> relative weight of the movement, see setTurnShares. */
@@ -461,6 +464,7 @@ class SimulationImpl implements Simulation {
     this.pendingLeader = new Int32Array(opts.config.demand.vehicleBudget).fill(-1);
     this.laneChangeBlocked = new Uint8Array(opts.config.demand.vehicleBudget);
     this.gridlockDisciplined = new Uint8Array(opts.config.demand.vehicleBudget);
+    this.invariantsVisited = new Uint8Array(opts.config.demand.vehicleBudget);
     this.turnShares = new Float64Array(this.runtime.linkCount * TURN_COUNT);
     this.turnSharesSet = new Uint8Array(this.runtime.linkCount);
 
@@ -610,6 +614,9 @@ class SimulationImpl implements Simulation {
     this.updatePositions(now);
     this.sampleMetrics(now, peak); // 10 (T-18)
     this.foldHash();
+    if (this.cfg.debugInvariants) {
+      checkInvariants(this.pool, this.runtime, this.invariantsVisited, now);
+    }
   }
 
   /**
@@ -1726,11 +1733,24 @@ class SimulationImpl implements Simulation {
     pool.release(i);
   }
 
-  /** Keeps every track list sorted by `s` (a no-op walk unless a follower overtook its leader). */
+  /**
+   * Keeps every track list sorted by `s` (a no-op walk unless a follower overtook its leader). In
+   * debug mode the walk (`checkTrackOrder`, T-04 review note) still repairs an ordinary crossing the
+   * same way, but throws instead of repairing one that overtakes its leader by more than the model's
+   * own tolerance (`runtime/invariants.ts`'s `GAP_TOLERANCE_M`) -- a real defect, not the
+   * characterised transient.
+   */
   private repairOrder(): void {
     const pool = this.pool;
     const tail = pool.trackTail;
     const n = this.runtime.trackCount;
+    if (this.cfg.debugInvariants) {
+      const now = this.clock.simTimeS;
+      for (let t = 0; t < n; t++) {
+        if ((tail[t] as number) >= 0) checkTrackOrder(pool, t, now);
+      }
+      return;
+    }
     for (let t = 0; t < n; t++) {
       if ((tail[t] as number) >= 0) pool.sortTrack(t);
     }
