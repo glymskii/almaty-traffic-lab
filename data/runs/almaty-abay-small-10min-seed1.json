@@ -1,0 +1,685 @@
+{
+  "networkId": "almaty-abay-small",
+  "scenarioId": "baseline",
+  "seed": 1,
+  "simulatedS": 1200,
+  "trajectoryHash": "cc65b4b452cc85d3",
+  "totals": {
+    "vehiclesActive": 13669,
+    "vehiclesCompleted": 2987,
+    "delayVehH": 7.961773370567287,
+    "delayPersonH": 24.738800439485857,
+    "meanSpeedKph": 31.174846672415633,
+    "carMeanSpeedKph": 31.966039085538917,
+    "busMeanSpeedKph": 13.120511440778772,
+    "stoppedShare": 0.9291828224449484,
+    "congestedSegmentShare": 0.00024390243902439024
+  },
+  "top": [
+    {
+      "rank": 1,
+      "id": "w40755921_0_f:n259994572",
+      "segmentIndices": [
+        964,
+        965,
+        966,
+        967,
+        968,
+        969,
+        977,
+        978,
+        979,
+        980,
+        981,
+        982,
+        990,
+        991,
+        992,
+        993,
+        994,
+        995,
+        1003,
+        1004,
+        1005,
+        1006,
+        1007,
+        1008
+      ],
+      "linkId": "w40755921_0_f",
+      "nodeId": "n259994572",
+      "title": "улица Курмангазы × улица Шагабутдинова, подход с запада",
+      "delayVehH": 6.691683519151476,
+      "delayPersonH": 10.144819844563802,
+      "speedRatio": 0.0033033994502954115,
+      "queueM": 134.44605255126953,
+      "vcRatio": 0.045627377927303314,
+      "los": "A",
+      "persistence": 1,
+      "causes": [
+        {
+          "cause": "pedestrian_yield",
+          "share": 0.30910418320565936
+        },
+        {
+          "cause": "signal_red",
+          "share": 0.30369739523643463
+        },
+        {
+          "cause": "downstream_spillback",
+          "share": 0.2047403805892494
+        },
+        {
+          "cause": "lane_change_wait",
+          "share": 0.13079934008267316
+        },
+        {
+          "cause": "yield_priority",
+          "share": 0.05165870088598326
+        }
+      ],
+      "recommendations": [
+        {
+          "kind": "rebalance_green",
+          "label": "Добавить 10 с зелёного этому подходу (до 27 с)",
+          "overrides": [
+            {
+              "kind": "signal",
+              "nodeId": "n259994572",
+              "set": {
+                "greenS": {
+                  "sg.w40755921_0_f.main": 27
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "focus": [
+        314.32,
+        1108.94
+      ]
+    },
+    {
+      "rank": 2,
+      "id": "w1235109779_1_f:n260723746",
+      "segmentIndices": [
+        5902,
+        5903,
+        5904,
+        5905,
+        5906,
+        5907,
+        5908,
+        5909,
+        5910,
+        5911,
+        5912,
+        5913,
+        5914,
+        5915,
+        5916,
+        5917,
+        5918,
+        5919,
+        5920,
+        5921
+      ],
+      "linkId": "w1235109779_1_f",
+      "nodeId": "n260723746",
+      "title": "проспект Абая × улица Биокомбинатская, подход с востока",
+      "delayVehH": 4.383729586700598,
+      "delayPersonH": 6.598100468284554,
+      "speedRatio": 0.012722674199918946,
+      "queueM": 108.8393783569336,
+      "vcRatio": 0.09125475585460663,
+      "los": "A",
+      "persistence": 0.9941477011688474,
+      "causes": [
+        {
+          "cause": "yield_priority",
+          "share": 0.6878840878909039
+        },
+        {
+          "cause": "pedestrian_yield",
+          "share": 0.29579661457475387
+        },
+        {
+          "cause": "downstream_spillback",
+          "share": 0.01428345594405869
+        },
+        {
+          "cause": "lane_change_wait",
+          "share": 0.002035841590283526
+        }
+      ],
+      "recommendations": [],
+      "focus": [
+        -455.72,
+        810.6
+      ]
+    },
+    {
+      "rank": 3,
+      "id": "w385200734_0_f:n242095776",
+      "segmentIndices": [
+        3691,
+        3692,
+        3698,
+        3699,
+        3700,
+        3701,
+        3702,
+        3703,
+        3709,
+        3710,
+        3711,
+        3712,
+        3713,
+        3714,
+        3720,
+        3721,
+        3722,
+        3723,
+        3724,
+        3725,
+        3731,
+        3732,
+        3733,
+        3734,
+        3735,
+        3736
+      ],
+      "linkId": "w385200734_0_f",
+      "nodeId": "n242095776",
+      "title": "проспект Абая × проспект Сейфуллина, подход с востока",
+      "delayVehH": 3.975771759930584,
+      "delayPersonH": 6.7727882395850285,
+      "speedRatio": 0.00427403496529521,
+      "queueM": 90.64614486694336,
+      "vcRatio": 0.1013941690325737,
+      "los": "A",
+      "persistence": 0.9902794447632927,
+      "causes": [
+        {
+          "cause": "pocket_spillback",
+          "share": 0.8278193005086548
+        },
+        {
+          "cause": "pedestrian_yield",
+          "share": 0.07778250947776062
+        },
+        {
+          "cause": "gap_left_turn",
+          "share": 0.06861772302544507
+        },
+        {
+          "cause": "signal_red",
+          "share": 0.022444163779880323
+        },
+        {
+          "cause": "yield_priority",
+          "share": 0.0026471148432154674
+        }
+      ],
+      "recommendations": [
+        {
+          "kind": "extend_left_pocket",
+          "label": "Удлинить левый карман до 120 м, чтобы очередь поворотных не вставала в прямую полосу",
+          "overrides": [
+            {
+              "kind": "link",
+              "linkId": "w385200734_0_f",
+              "set": {
+                "leftPocketLengthM": 120
+              }
+            }
+          ]
+        }
+      ],
+      "focus": [
+        1326.82,
+        957.17
+      ]
+    },
+    {
+      "rank": 4,
+      "id": "w30811931_0_f:n260730697",
+      "segmentIndices": [
+        682,
+        683,
+        684,
+        685,
+        686,
+        687,
+        698,
+        699,
+        700,
+        701,
+        702,
+        703
+      ],
+      "linkId": "w30811931_0_f",
+      "nodeId": "n260730697",
+      "title": "улица Манаса × улица Шевченко, подход с юга",
+      "delayVehH": 3.506666666666667,
+      "delayPersonH": 5.303833346896702,
+      "speedRatio": 0,
+      "queueM": 142.77365112304688,
+      "vcRatio": 0,
+      "los": "A",
+      "persistence": 1,
+      "causes": [
+        {
+          "cause": "gap_left_turn",
+          "share": 0.5
+        },
+        {
+          "cause": "lane_change_wait",
+          "share": 0.4791666666666667
+        },
+        {
+          "cause": "yield_priority",
+          "share": 0.020833333333333332
+        }
+      ],
+      "recommendations": [],
+      "focus": [
+        -804.66,
+        1191.35
+      ]
+    },
+    {
+      "rank": 5,
+      "id": "w30992560_0_b:n256225449",
+      "segmentIndices": [
+        888,
+        889,
+        890,
+        891,
+        892,
+        893,
+        895,
+        896,
+        897,
+        898,
+        899,
+        900
+      ],
+      "linkId": "w30992560_0_b",
+      "nodeId": "n256225449",
+      "title": "улица Байтурсынова × улица Габдулина, подход с юго-запада",
+      "delayVehH": 3.1972752888997396,
+      "delayPersonH": 4.905123969184028,
+      "speedRatio": 0.0066056966852960945,
+      "queueM": 134.42426300048828,
+      "vcRatio": 0.13519223034381866,
+      "los": "A",
+      "persistence": 0.9970325351228915,
+      "causes": [
+        {
+          "cause": "pedestrian_yield",
+          "share": 0.4741309093816789
+        },
+        {
+          "cause": "signal_red",
+          "share": 0.3522587701455501
+        },
+        {
+          "cause": "gap_left_turn",
+          "share": 0.16594201616166415
+        },
+        {
+          "cause": "lane_change_wait",
+          "share": 0.007668304311106777
+        }
+      ],
+      "recommendations": [
+        {
+          "kind": "rebalance_green",
+          "label": "Добавить 10 с зелёного этому подходу (до 25 с)",
+          "overrides": [
+            {
+              "kind": "signal",
+              "nodeId": "n256225449",
+              "set": {
+                "greenS": {
+                  "sg.w30992560_0_b.main": 25
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "focus": [
+        1066.07,
+        93
+      ]
+    },
+    {
+      "rank": 6,
+      "id": "w234824496_0_f:n256225047",
+      "segmentIndices": [
+        2783,
+        2784,
+        2785,
+        2786,
+        2787,
+        2788,
+        2792,
+        2793,
+        2794,
+        2795,
+        2796,
+        2797
+      ],
+      "linkId": "w234824496_0_f",
+      "nodeId": "n256225047",
+      "title": "улица Байзакова × улица Тимирязева, подход с востока",
+      "delayVehH": 3.132402852376302,
+      "delayPersonH": 7.56156270345052,
+      "speedRatio": 0.016703891280309205,
+      "queueM": 142.27548599243164,
+      "vcRatio": 0.27652955055236816,
+      "los": "A",
+      "persistence": 0.9892415640925296,
+      "causes": [
+        {
+          "cause": "pedestrian_yield",
+          "share": 0.6738449141177142
+        },
+        {
+          "cause": "signal_red",
+          "share": 0.2830928073031474
+        },
+        {
+          "cause": "downstream_spillback",
+          "share": 0.04306227857913836
+        }
+      ],
+      "recommendations": [
+        {
+          "kind": "rebalance_green",
+          "label": "Добавить 10 с зелёного этому подходу (до 29 с)",
+          "overrides": [
+            {
+              "kind": "signal",
+              "nodeId": "n256225047",
+              "set": {
+                "greenS": {
+                  "sg.w234824496_0_f.main": 29
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "focus": [
+        -182.41999999999996,
+        -716.8
+      ]
+    },
+    {
+      "rank": 7,
+      "id": "w1374191444_1_f:n259994571",
+      "segmentIndices": [
+        6838,
+        6839,
+        6840,
+        6841,
+        6842,
+        6843,
+        6844,
+        6845,
+        6846,
+        6847,
+        6848,
+        6849,
+        6850,
+        6851,
+        6852,
+        6853,
+        6854,
+        6855,
+        6856,
+        6857,
+        6858,
+        6859,
+        6860,
+        6861
+      ],
+      "linkId": "w1374191444_1_f",
+      "nodeId": "n259994571",
+      "title": "проспект Абая × улица Шагабутдинова, подход с востока",
+      "delayVehH": 3.0848567093743218,
+      "delayPersonH": 5.281611932383643,
+      "speedRatio": 0.04853163769060256,
+      "queueM": 67.60317134857178,
+      "vcRatio": 0.22053231298923492,
+      "los": "A",
+      "persistence": 0.7356486457185023,
+      "causes": [
+        {
+          "cause": "pedestrian_yield",
+          "share": 0.971563158854791
+        },
+        {
+          "cause": "lane_change_wait",
+          "share": 0.019044625867720356
+        },
+        {
+          "cause": "gridlock",
+          "share": 0.009392215277488186
+        }
+      ],
+      "recommendations": [],
+      "focus": [
+        338.58,
+        861.12
+      ]
+    },
+    {
+      "rank": 8,
+      "id": "w1312808648_0_f:n260726581",
+      "segmentIndices": [
+        6126,
+        6127,
+        6128,
+        6129,
+        6130,
+        6131,
+        6134,
+        6135,
+        6136,
+        6137,
+        6138,
+        6139,
+        6142,
+        6143,
+        6144,
+        6145,
+        6146,
+        6147
+      ],
+      "linkId": "w1312808648_0_f",
+      "nodeId": "n260726581",
+      "title": "улица Ауэзова × улица Курмангазы, подход с юга",
+      "delayVehH": 2.971771371497048,
+      "delayPersonH": 4.4807533899943035,
+      "speedRatio": 0.034089810878404965,
+      "queueM": 139.78844833374023,
+      "vcRatio": 0.19771863520145416,
+      "los": "A",
+      "persistence": 0.9402235621718986,
+      "causes": [
+        {
+          "cause": "gap_left_turn",
+          "share": 0.6108052779307214
+        },
+        {
+          "cause": "pedestrian_yield",
+          "share": 0.28400517024255223
+        },
+        {
+          "cause": "lane_change_wait",
+          "share": 0.10421466548339887
+        },
+        {
+          "cause": "pocket_spillback",
+          "share": 0.0009748863433274759
+        }
+      ],
+      "recommendations": [],
+      "focus": [
+        -1154.02,
+        951.24
+      ]
+    },
+    {
+      "rank": 9,
+      "id": "w234259112_0_f:n260556145",
+      "segmentIndices": [
+        2698,
+        2699,
+        2700,
+        2701,
+        2702,
+        2703,
+        2705,
+        2706,
+        2707,
+        2708,
+        2709,
+        2710
+      ],
+      "linkId": "w234259112_0_f",
+      "nodeId": "n260556145",
+      "title": "улица Маркова × улица Тимирязева, подход с северо-востока",
+      "delayVehH": 2.942607642279731,
+      "delayPersonH": 4.513933325873481,
+      "speedRatio": 0.010444468409398416,
+      "queueM": 114.3625955581665,
+      "vcRatio": 0.1013941690325737,
+      "los": "A",
+      "persistence": 0.9665955398996664,
+      "causes": [
+        {
+          "cause": "pedestrian_yield",
+          "share": 0.31517874457548495
+        },
+        {
+          "cause": "signal_red",
+          "share": 0.27576671650248774
+        },
+        {
+          "cause": "downstream_spillback",
+          "share": 0.21968042637878993
+        },
+        {
+          "cause": "gridlock",
+          "share": 0.16143338345299166
+        },
+        {
+          "cause": "gap_left_turn",
+          "share": 0.019530066343939348
+        }
+      ],
+      "recommendations": [
+        {
+          "kind": "rebalance_green",
+          "label": "Добавить 10 с зелёного этому подходу (до 25 с)",
+          "overrides": [
+            {
+              "kind": "signal",
+              "nodeId": "n260556145",
+              "set": {
+                "greenS": {
+                  "sg.w234259112_0_f.main": 25
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "focus": [
+        1095.22,
+        -418.55
+      ]
+    },
+    {
+      "rank": 10,
+      "id": "w1146968968_0_f:n242095776",
+      "segmentIndices": [
+        5626,
+        5627,
+        5628,
+        5629,
+        5630,
+        5631,
+        5632,
+        5633,
+        5634,
+        5635,
+        5636,
+        5637
+      ],
+      "linkId": "w1146968968_0_f",
+      "nodeId": "n242095776",
+      "title": "проспект Абая × проспект Сейфуллина, подход с севера",
+      "delayVehH": 2.732128685845269,
+      "delayPersonH": 4.145321858723959,
+      "speedRatio": 0.022502957854619806,
+      "queueM": 74.7298231124878,
+      "vcRatio": 0.3717786371707916,
+      "los": "B",
+      "persistence": 0.9995910449365573,
+      "causes": [
+        {
+          "cause": "pedestrian_yield",
+          "share": 0.3609119309630549
+        },
+        {
+          "cause": "signal_red",
+          "share": 0.2926650339928701
+        },
+        {
+          "cause": "gap_left_turn",
+          "share": 0.28277866560135945
+        },
+        {
+          "cause": "lane_change_wait",
+          "share": 0.0411931447773873
+        },
+        {
+          "cause": "downstream_spillback",
+          "share": 0.014896125244923245
+        }
+      ],
+      "recommendations": [
+        {
+          "kind": "rebalance_green",
+          "label": "Добавить 10 с зелёного этому подходу (до 25 с)",
+          "overrides": [
+            {
+              "kind": "signal",
+              "nodeId": "n242095776",
+              "set": {
+                "greenS": {
+                  "sg.w1146968968_0_f.main": 25
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "focus": [
+        1321.58,
+        956.77
+      ]
+    }
+  ],
+  "perf": {
+    "wallMs": 31822.429459,
+    "stepsPerS": 377.09251631654314,
+    "vehiclesMean": 8618.85
+  }
+}

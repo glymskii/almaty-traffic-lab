@@ -1,0 +1,96 @@
+# pnpm run compile --bbox small  (9 сентября 2026)
+compile: almaty-abay-small (Абая – Тимирязева × Ауэзова – Сейфуллина (тестовый квадрат)) <- <repo>/data/osm/almaty-abay-small/snapshot.json.gz
+compile: 444 nodes (junction 208, signalized 70, merge 1, gate 56, dead_end 36, bend 73), 896 links, 1675 lanes, 112.8 km in 235 ms
+compile: defaults: speed 66% of links, lane count 40% of links, turns 92% of lanes; bus lanes 96, pockets 70
+compile: assumptions:
+  speed_limit_default             592  e.g. w22576030_0_f (улица Шевченко)
+  lane_count_default              320  e.g. w22576030_0_f (улица Шевченко)
+  turns_default                  1547  e.g. w22576030_0_f:0
+  left_pocket_default              40  e.g. w23978205_0_b:0
+  pocket_length_default            30  e.g. w23444306_0_b:0
+  bus_lane_hours_default           96  e.g. w24042613_0_b:1
+  bus_lane_position_assumed         1  e.g. w692910574_0_f:3
+  merge_node_default                1  e.g. n4315331683
+  connector_priority_default     1540  e.g. w1010536935_0_f:0>w1010536935_1_f:0
+  crosswalk_default               590  e.g. n1020210743.x0
+  signal_plan_default              70  e.g. n12033720764.ctrl
+  left_turn_protected_default      14  e.g. w605261126_0_f
+  left_turn_permissive_default    100  e.g. w1085142674_0_f
+  left_turn_prohibited_default     72  e.g. w605093942_0_f
+  gate_weight_default              56  e.g. ng1010536935_0.gate
+  attractor_weight_default        145  e.g. poi.n1508723547
+  bus_headway_peak_default         25  e.g. route.r2367770
+  bus_headway_offpeak_default      22  e.g. route.r2367770
+  bus_stop_kind_default            69  e.g. stop.n507191810
+compile: 108 warnings
+  way 124841590: lanes=3 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes
+  way 333558546: lanes=3 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes
+  way 334057429: lanes=3 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes
+  way 446405100: lanes=3 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes
+  way 539985267: lanes=3 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes
+  way 539985272: lanes=1 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes
+  way 539985282: turn:lanes has 3 entries but the forward direction has 2 lanes; turn:lanes ignored
+  way 615943293: the only lane backward is a bus lane; adding a general lane (default)
+  way 692910574: bus:lanes designates lane 1 of 4 (not the rightmost); modelled as the rightmost lane
+  way 692910574: the only lane backward is a bus lane; adding a general lane (default)
+  way 692910574: turn:lanes has 1 entries but the backward direction has 2 lanes; turn:lanes ignored
+  way 693656421: lanes=2 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes
+  way 693656423: lanes=3 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes
+  way 693656426: lanes=3 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes
+  way 693656427: lanes=3 contradicts turn:lanes with 4 entries on a one-way street; using turn:lanes
+  ... 93 more in <repo>/data/networks/almaty-abay-small.assumptions.json
+compile: wrote <repo>/data/networks/almaty-abay-small.network.json.gz and <repo>/data/networks/almaty-abay-small.assumptions.json
+
+# pnpm sim --bbox small --minutes 10 --seed 1  (9 сентября 2026)
+network almaty-abay-small, scenario baseline, seed 1
+simulated 20.0 min, trajectoryHash cc65b4b452cc85d3
+totals:
+  активных машин............ 13669
+  завершённых поездок....... 2987
+  задержка, маш-ч........... 8.0
+  задержка, чел-ч........... 24.7
+  средняя скорость, км/ч.... 31.2 (авто 32.0, автобусы 13.1)
+  доля стоящих машин........ 93%
+  сегментов в заторе (E/F).. 0%
+top (10):
+  #1 улица Курмангазы × улица Шагабутдинова, подход с запада
+      задержка 6.7 маш-ч / 10.1 чел-ч, LOS A, V/C 0.05
+      причины: Пропуск пешеходов 31%, Красный сигнал 30%, Затор ниже по потоку 20%, Ожидание перестроения 13%, Уступает главной дороге 5%
+      рекомендации: Добавить 10 с зелёного этому подходу (до 27 с)
+  #2 проспект Абая × улица Биокомбинатская, подход с востока
+      задержка 4.4 маш-ч / 6.6 чел-ч, LOS A, V/C 0.09
+      причины: Уступает главной дороге 69%, Пропуск пешеходов 30%, Затор ниже по потоку 1%, Ожидание перестроения 0%
+      рекомендации: —
+  #3 проспект Абая × проспект Сейфуллина, подход с востока
+      задержка 4.0 маш-ч / 6.8 чел-ч, LOS A, V/C 0.10
+      причины: Переполненный поворотный карман 83%, Пропуск пешеходов 8%, Ожидание разрыва для левого поворота 7%, Красный сигнал 2%, Уступает главной дороге 0%
+      рекомендации: Удлинить левый карман до 120 м, чтобы очередь поворотных не вставала в прямую полосу
+  #4 улица Манаса × улица Шевченко, подход с юга
+      задержка 3.5 маш-ч / 5.3 чел-ч, LOS A, V/C 0.00
+      причины: Ожидание разрыва для левого поворота 50%, Ожидание перестроения 48%, Уступает главной дороге 2%
+      рекомендации: —
+  #5 улица Байтурсынова × улица Габдулина, подход с юго-запада
+      задержка 3.2 маш-ч / 4.9 чел-ч, LOS A, V/C 0.14
+      причины: Пропуск пешеходов 47%, Красный сигнал 35%, Ожидание разрыва для левого поворота 17%, Ожидание перестроения 1%
+      рекомендации: Добавить 10 с зелёного этому подходу (до 25 с)
+  #6 улица Байзакова × улица Тимирязева, подход с востока
+      задержка 3.1 маш-ч / 7.6 чел-ч, LOS A, V/C 0.28
+      причины: Пропуск пешеходов 67%, Красный сигнал 28%, Затор ниже по потоку 4%
+      рекомендации: Добавить 10 с зелёного этому подходу (до 29 с)
+  #7 проспект Абая × улица Шагабутдинова, подход с востока
+      задержка 3.1 маш-ч / 5.3 чел-ч, LOS A, V/C 0.22
+      причины: Пропуск пешеходов 97%, Ожидание перестроения 2%, Перекрёсток заперт поперечным потоком 1%
+      рекомендации: —
+  #8 улица Ауэзова × улица Курмангазы, подход с юга
+      задержка 3.0 маш-ч / 4.5 чел-ч, LOS A, V/C 0.20
+      причины: Ожидание разрыва для левого поворота 61%, Пропуск пешеходов 28%, Ожидание перестроения 10%, Переполненный поворотный карман 0%
+      рекомендации: —
+  #9 улица Маркова × улица Тимирязева, подход с северо-востока
+      задержка 2.9 маш-ч / 4.5 чел-ч, LOS A, V/C 0.10
+      причины: Пропуск пешеходов 32%, Красный сигнал 28%, Затор ниже по потоку 22%, Перекрёсток заперт поперечным потоком 16%, Ожидание разрыва для левого поворота 2%
+      рекомендации: Добавить 10 с зелёного этому подходу (до 25 с)
+  #10 проспект Абая × проспект Сейфуллина, подход с севера
+      задержка 2.7 маш-ч / 4.1 чел-ч, LOS B, V/C 0.37
+      причины: Пропуск пешеходов 36%, Красный сигнал 29%, Ожидание разрыва для левого поворота 28%, Ожидание перестроения 4%, Затор ниже по потоку 1%
+      рекомендации: Добавить 10 с зелёного этому подходу (до 25 с)
+perf: 377 шагов/с, 8619 машин в среднем, 31822 мс
